@@ -1,0 +1,20 @@
+{
+  "address_sanitizer": "passed",
+  "undefined_behavior_sanitizer": "passed",
+  "leak_sanitizer": "unavailable_in_traced_runtime",
+  "leak_detection_enabled": false,
+  "checks": {
+    "profile": "XGPU-C01",
+    "checks": 6343188,
+    "random_programs": 160,
+    "million_invocations_exact": true,
+    "checkpoint_resume": true,
+    "uint32_wrap": true,
+    "select_regions": true,
+    "failed_instruction_atomic": true,
+    "irregular_details_preserved": 1024,
+    "hardware_gpu_executed": false,
+    "ether_integrated": false,
+    "failures": 0
+  }
+}

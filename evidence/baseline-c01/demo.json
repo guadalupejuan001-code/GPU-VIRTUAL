@@ -1,0 +1,29 @@
+{
+  "profile": "XGPU-C01",
+  "host": "CPU",
+  "logical_invocations": 1048576,
+  "pc": 12,
+  "revision": 12,
+  "output_bands": 2,
+  "output_coefficients": 5,
+  "output_details": 1,
+  "complete_snapshot_bytes": 437,
+  "samples": [
+    {
+      "i": 0,
+      "value": 12
+    },
+    {
+      "i": 1,
+      "value": 15
+    },
+    {
+      "i": 524288,
+      "value": 37748880
+    },
+    {
+      "i": 1048575,
+      "value": 16
+    }
+  ]
+}

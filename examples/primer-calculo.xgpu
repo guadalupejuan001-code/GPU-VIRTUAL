@@ -1,0 +1,16 @@
+xgpu 1
+# Perfil propio experimental. El indice i identifica cada ejecucion logica.
+dominio 1048576
+indice r0
+constante r1 3
+producto r2 r0 r1
+constante r3 7
+suma r4 r2 r3
+detalle r4 1048575 4294967295
+constante r5 5
+suma r6 r4 r5
+producto r7 r6 r6
+# i < 524288 elige r6; las demas ejecuciones eligen r7.
+elige r7 524288 r6 r7
+salida r7
+fin

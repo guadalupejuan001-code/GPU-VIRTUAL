@@ -1,0 +1,40 @@
+name: C01 - compilacion y equivalencia
+
+'on':
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  c01:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Obtener la revision exacta
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Compilar y comprobar C01
+        run: bash build.sh
+
+      - name: AddressSanitizer, UndefinedBehaviorSanitizer y fugas
+        run: bash sanitizers.sh
+
+      - name: Medir y verificar la reanudacion persistida
+        run: python3 measure.py
+
+      - name: Conservar programas y evidencia
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: GPU-VIRTUAL-C01-${{ github.sha }}
+          path: |
+            evidence/current/
+            build/gpu_c01
+            build/pruebas
+          if-no-files-found: error
+          retention-days: 30
