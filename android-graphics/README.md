@@ -1,13 +1,38 @@
-# C08R: arranque compatible y campana de graficos compactos
+# C08R2: compute compatible con calificadores readonly
 
-Instalar **GPU-VIRTUAL-C08R-ARRANQUE.apk** y abrir **C08R Arranque**.
-El paquete es `x.gpu.recovery`, separado tambien de C08. No requiere red,
+Instalar **GPU-VIRTUAL-C08R2-COMPUTE.apk** y abrir **C08R2 Compute**.
+El paquete es `x.gpu.shaderfix`, separado tambien de C08R. No requiere red,
 motores externos ni permisos generales de almacenamiento.
+
+## Diagnostico recibido y correccion C08R2
+
+El JSON fisico de SM-S166V / Mali-G68, con fuente
+`6bc15ee8390d754b0bcacb0a16ead45838fde3e0`, confirma el primer cuadro
+en 191.946.039 ns (unos 0,192 s). La superficie media 1002 x 731 y estaba
+adjunta. El visor C06 y su recuperacion funcionan; no se habia iniciado
+una medicion sostenida ni se habian contado cuadros de benchmark.
+
+El error se produce en ADVANCED_COMPUTE, linea 28 del shader ensamblado:
+`Function call discards 'readonly' access qualifier.` La llamada pasaba
+`hashes[id]`, miembro del SSBO readonly, directamente a `sceneValueFromHash`.
+C08R2 lee primero el uint en una variable local y pasa ese valor a la funcion.
+Conserva readonly en el buffer, la cache, los cuatro metodos y todos los bits;
+no lo sustituye por otra ruta ni elimina la proteccion de escritura.
+
+El control GL software vuelve a contrastar los mismos 12.032.024 valores y
+39 pares de imagenes. CI agrega glslangValidator como compilador anfitrion
+independiente de lenguaje GLSL ES 3.10 para los cuatro shaders de produccion.
+Ninguno de esos controles ejecuta el driver Mali: la compilacion corregida
+y sus FPS deben confirmarse con el APK en el telefono.
+
+Referencia del lenguaje: GLSL ES 3.10, calificadores de memoria y funciones:
+https://registry.khronos.org/OpenGL/specs/es/3.1/GLSL_ES_Specification_3.10.pdf
 
 ## Reparacion de arranque C08R
 
 El usuario informo que C08 quedaba en «Abriendo la escena», sin imagen.
-No hay aun un log del telefono que identifique la llamada exacta. La revision
+El informe inicial no tenia log; el diagnostico posterior lo localizo en
+compute, como se detalla arriba. La revision inicial
 encontro que el primer cuadro dependia de inicializar todos los programas,
 buffers y cache nuevos; un error solo se mostraba en el resumen y dejaba
 intacto el mensaje superior. Ademas, el viewport usaba solo el espacio libre
@@ -160,7 +185,7 @@ esa seleccion no predice sus FPS visibles, los de otros perfiles o juegos.
 El boton **Latencia (2 rutas)** conserva la referencia corta CPU/reglas a
 512 x 512; se etiqueta en ms para distinguirla de la campana.
 
-## Verificaciones y compilacion de C08R
+## Verificaciones y compilacion de C08R2
 
 - Referencia escalar Python frente a Java: 42 estados, 8.184 palabras,
   dominios hasta 262.144, semillas, overflow y excepciones.
@@ -170,6 +195,10 @@ El boton **Latencia (2 rutas)** conserva la referencia corta CPU/reglas a
   posiciones compensadas, cargas de 512/HD y lotes 8/16.
 - `StartupTest`: 13 controles de confirmacion inicial, espera independiente,
   funciones nuevas diferidas, fallo sin perder el visor y recreacion de contexto.
+- `validate_shaders.py`: compila los shaders reales de arranque, vertex,
+  fragment y compute con glslangValidator. CI instala glslang-tools y guarda
+  los hashes de las fuentes y la version del compilador. Es un control de
+  lenguaje adicional, no un sustituto del compilador Mali.
 - `verify_host.py`: ejecuta los GLSL de produccion en llvmpipe CPU y
   verifica **12.032.024 palabras de estado**, **827.906 hashes**, doce escenas
   con cuatro rutas equivalentes, dos imagenes finales de lotes y la imagen
@@ -183,6 +212,7 @@ El APK debe ejecutarse en el Samsung para obtener esa evidencia.
 
 ```sh
 python3 android-graphics/verify_host.py
+python3 android-graphics/validate_shaders.py  # requiere glslang-tools
 bash android-graphics/build.sh
 ```
 

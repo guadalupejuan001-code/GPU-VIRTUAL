@@ -302,12 +302,26 @@ La revision [C08R](android-graphics/README.md) responde al reporte de C08
 detenido en «Abriendo la escena». Inicia con los shaders propios C06 ya
 probados en Mali, prepara las cuatro rutas al pedirlas y da altura fija al
 viewport con controles desplazables. La UI muestra etapa, error y tiempo;
-el diagnostico se puede copiar sin esperar al hilo GL. No se atribuye aun
-el bloqueo del telefono a una llamada concreta: falta recibir su log.
+el diagnostico se puede copiar sin esperar al hilo GL. El log recibido
+posteriormente confirma el primer cuadro y localiza el fallo de las funciones
+nuevas en compute, como se detalla en C08R2.
 
 El primer cuadro se confirma antes de habilitar las pruebas. Trece controles
 anfitriones verifican ese estado y el regreso al visor si falla una funcion
 nueva. El control software conserva los 12.032.024 valores, contrasta 39
 pares de imagenes e incluye 97 fences, ahora con un primer render C06 sin
-crear buffers de estado ni compute. El APK C08R requiere confirmacion fisica.
+crear buffers de estado ni compute. El log fisico posterior de C08R confirma
+ese primer cuadro; las funciones nuevas requieren la correccion C08R2.
+
+## C08R2: corregir la llamada desde un buffer readonly
+
+El diagnostico del Samsung confirma que C08R abre el visor en unos 0,192 s.
+Las funciones nuevas fallan al compilar compute: el shader pasaba un miembro
+de buffer readonly directamente a una funcion, rechazado por el compilador
+Mali en la linea 28. C08R2 lo copia a un uint local antes de la llamada,
+manteniendo el buffer readonly, las cuatro rutas y su salida exacta.
+
+Se conservan los controles de valores e imagenes y se agrega compilacion
+independiente de los GLSL ES 3.10 de produccion con glslangValidator. La
+correccion de compilacion y los FPS nuevos requieren verificar el APK en Mali.
 

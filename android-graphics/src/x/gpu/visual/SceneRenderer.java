@@ -333,7 +333,7 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
             .put("latest_window_fps",s.windowFps<0?JSONObject.NULL:s.windowFps).put("message",s.message);
     }
     public JSONObject diagnostic()throws Exception {
-        return new JSONObject().put("format","GPU-VIRTUAL-C08R-diagnostic-v1").put("source_commit",BuildInfo.SOURCE_SHA)
+        return new JSONObject().put("format","GPU-VIRTUAL-C08R2-diagnostic-v1").put("source_commit",BuildInfo.SOURCE_SHA)
             .put("completed_benchmark_result",false).put("hardware_sustained_test_passed",false).put("device",Build.MODEL)
             .put("monitor",monitorJson(probe())).put("startup",startupJson()).put("gl_renderer",renderer).put("gl_vendor",vendor).put("gl_version",version)
             .put("scope","UI snapshot only; elapsed timer is not evidence of GPU progress. Frames increment only after signaled GLsync.");
@@ -390,7 +390,7 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
         Sustained(int n,DeviceInfo deviceInfo,BenchmarkPlan plan)throws Exception {
             this.n=n;this.deviceInfo=deviceInfo;this.plan=plan;
             need(n>=1&&n<=MAX_OBJECTS,"Carga fuera del instrumento");
-            archive=new File(cache,"GPU-VIRTUAL-C08R-"+n+"-"+plan.width+"x"+plan.height+"-B"+plan.pipeline+"-"+runId+".zip");
+            archive=new File(cache,"GPU-VIRTUAL-C08R2-"+n+"-"+plan.width+"x"+plan.height+"-B"+plan.pipeline+"-"+runId+".zip");
             zip=new ZipOutputStream(new FileOutputStream(archive));zip.setLevel(1);
         }
         void put(String name,byte[] value)throws Exception{zip.putNextEntry(new ZipEntry(name));zip.write(value);zip.closeEntry();}
@@ -480,7 +480,7 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
                 report.put("n",n).put("width",plan.width).put("height",plan.height).put("scene_seed",SEED).put("pipeline_frames",plan.pipeline);
                 JSONObject initial=device();report.put("device_start",initial);
                 need(initial.has("power_save_mode")&&!initial.getBoolean("power_save_mode"),"Desactiva el ahorro de energia antes de medir este perfil");
-                continuing();ensureAdvanced();continuing();report.put("build_variant","C08R");
+                continuing();ensureAdvanced();continuing();report.put("build_variant","C08R2");
                 monitor.operation("PREPARE_TARGETS_AND_CACHE",System.nanoTime());
                 ensureTargets(plan.width,plan.height);prepareGpuSlots(n,plan.pipeline);long cacheStart=System.nanoTime();prepareHashCache(n);
                 report.put("cache_prepare_before_test_ns",System.nanoTime()-cacheStart).put("cache_setup_ns_since_context_creation",hashSetupNs);

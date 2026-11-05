@@ -60,7 +60,7 @@ public final class MainActivity extends Activity implements SceneRenderer.Listen
         LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setBackgroundColor(Color.rgb(7,12,24));
         root.setPadding(dp(14),dp(10),dp(14),dp(10));
         root.setOnApplyWindowInsetsListener((view,insets)->{view.setPadding(dp(14)+insets.getSystemWindowInsetLeft(),dp(10)+insets.getSystemWindowInsetTop(),dp(14)+insets.getSystemWindowInsetRight(),dp(10)+insets.getSystemWindowInsetBottom());return insets;});
-        root.addView(label("GPU VIRTUAL  /  C08R",12,Color.rgb(119,217,231)));
+        root.addView(label("GPU VIRTUAL  /  C08R2",12,Color.rgb(119,217,231)));
         TextView title=label("Graficos compactos",27,Color.WHITE);title.setPadding(0,dp(3),0,dp(5));root.addView(title);
         TextView info=label("Cuatro metodos, la misma escena. Dos rondas de FPS sostenidos fuera de pantalla.",14,Color.rgb(171,183,203));root.addView(info);
         surface=new GLSurfaceView(this);surface.setEGLContextClientVersion(3);surface.setEGLConfigChooser(8,8,8,8,0,0);surface.setPreserveEGLContextOnPause(true);
@@ -136,10 +136,10 @@ public final class MainActivity extends Activity implements SceneRenderer.Listen
             JSONObject snapshot=renderer.diagnostic().put("surface_view_width",surface.getWidth()).put("surface_view_height",surface.getHeight())
                 .put("surface_view_attached",surface.isAttachedToWindow()).put("window_has_focus",surface.hasWindowFocus())
                 .put("requested_width",plan().width).put("requested_height",plan().height).put("requested_pipeline",batch).put("selected_objects",counts[selected]);
-            String text=snapshot.toString(2);File file=new File(getCacheDir(),"GPU-VIRTUAL-C08R-DIAGNOSTICO.json");
+            String text=snapshot.toString(2);File file=new File(getCacheDir(),"GPU-VIRTUAL-C08R2-DIAGNOSTICO.json");
             try(FileOutputStream out=new FileOutputStream(file)){out.write(text.getBytes(StandardCharsets.UTF_8));}
             ClipboardManager clipboard=(ClipboardManager)getSystemService(CLIPBOARD_SERVICE);if(clipboard==null)throw new IllegalStateException("Portapapeles no disponible");
-            clipboard.setPrimaryClip(ClipData.newPlainText("GPU VIRTUAL C08R",text));Toast.makeText(this,"Diagnostico copiado. Pegalo en el chat.",Toast.LENGTH_LONG).show();
+            clipboard.setPrimaryClip(ClipData.newPlainText("GPU VIRTUAL C08R2",text));Toast.makeText(this,"Diagnostico copiado. Pegalo en el chat.",Toast.LENGTH_LONG).show();
         }catch(Exception error){Toast.makeText(this,"No se pudo copiar: "+error,Toast.LENGTH_LONG).show();}
     }
     private String phase(ProbeMonitor.Snapshot s){

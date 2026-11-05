@@ -43,7 +43,7 @@ if [[ ! -f build/scene-debug.keystore ]]; then
     -keypass android -alias scene -keyalg RSA -keysize 2048 -validity 3650 \
     -dname "CN=GPU VIRTUAL Scene Test,O=GPU VIRTUAL,C=US"
 fi
-apk="build/dist/GPU-VIRTUAL-C08R-ARRANQUE.apk"
+apk="build/dist/GPU-VIRTUAL-C08R2-COMPUTE.apk"
 "$android_tools/apksigner" sign --ks build/scene-debug.keystore --ks-key-alias scene \
   --ks-pass pass:android --key-pass pass:android --out "$apk" build/aligned.apk
 "$android_tools/apksigner" verify --verbose "$apk" > build/dist/signature-validation.txt
@@ -51,12 +51,13 @@ apk="build/dist/GPU-VIRTUAL-C08R-ARRANQUE.apk"
 python3 - <<'PY'
 from pathlib import Path
 import json,hashlib,zipfile,shutil
-p=Path('build/dist/GPU-VIRTUAL-C08R-ARRANQUE.apk')
+p=Path('build/dist/GPU-VIRTUAL-C08R2-COMPUTE.apk')
 with zipfile.ZipFile(p) as z:
  assert z.testzip() is None and 'classes.dex' in z.namelist()
  for name in ['scene.glsl','vertex.glsl','fragment.glsl','compute.glsl','startup-scene.glsl','startup-vertex.glsl']:assert z.read('assets/'+name)==Path('assets',name).read_bytes()
 if Path('build/graphics-host-validation.json').exists():shutil.copyfile('build/graphics-host-validation.json','build/dist/graphics-host-validation.json')
 if Path('build/host-preview.png').exists():shutil.copyfile('build/host-preview.png','build/dist/host-preview.png')
+if Path('build/shader-compiler-validation.json').exists():shutil.copyfile('build/shader-compiler-validation.json','build/dist/shader-compiler-validation.json')
 report={'apk':p.name,'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),
         'signature_verified':True,'hardware_gpu_executed':False,'android_device_run_required':True,
         'scene_host':json.loads(Path('build/dist/scene-host-validation.json').read_text()),
@@ -64,7 +65,8 @@ report={'apk':p.name,'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_byt
         'monitor_host':json.loads(Path('build/dist/monitor-host-validation.json').read_text()),
         'plan_host':json.loads(Path('build/dist/plan-host-validation.json').read_text()),
         'startup_host':json.loads(Path('build/dist/startup-host-validation.json').read_text()),
-        'profile':'C08R deferred advanced initialization, byte-exact C06 startup shaders, confirmed first frame, native viewport with scrollable controls; C08 campaign preserved; physical device execution required'}
+        'shader_compiler_host':json.loads(Path('build/shader-compiler-validation.json').read_text()) if Path('build/shader-compiler-validation.json').exists() else None,
+        'profile':'C08R2 readonly SSBO value copied to a plain local before helper call; C08R safe startup and C08 four-route campaign preserved; Mali recheck required'}
 Path('build/dist/validation.json').write_text(json.dumps(report,indent=2)+'\n');print(json.dumps(report))
 PY
 
