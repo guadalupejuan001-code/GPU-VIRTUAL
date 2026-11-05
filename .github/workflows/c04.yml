@@ -1,0 +1,34 @@
+name: C04 - relaciones y continuacion compacta en CPU
+
+'on':
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  relations:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Obtener la revision exacta
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Verificar datos nuevos, excepciones, operaciones y archivos invalidos
+        run: python3 -m unittest discover -s experiments/c04 -p 'test_*.py' -v
+
+      - name: Repetir la exploracion sobre vectores CPU declarados
+        run: python3 experiments/c04/explore.py --synthetic --output evidence/current/c04-ci
+
+      - name: Conservar los formatos y su evidencia
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: GPU-VIRTUAL-C04-CPU-${{ github.sha }}
+          path: evidence/current/c04-ci/
+          if-no-files-found: error
+          retention-days: 30

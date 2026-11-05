@@ -1,4 +1,4 @@
-# GPU VIRTUAL — C01
+# GPU VIRTUAL
 
 Primer experimento de una representacion compacta del **estado de ejecucion**
 de una GPU virtual. El codigo se escribio para este proyecto, desde cero, con
@@ -177,8 +177,8 @@ La evidencia original del primer ensayo se conserva sin alterar en
 `evidence/current/`, ignorado por Git. El workflow C01 compila, prueba,
 reanuda el checkpoint, ejecuta sanitizadores y adjunta su evidencia.
 
-El siguiente ciclo debe ampliar las operaciones admitidas y verificar sus
-resultados sobre el estado compacto antes de integrar Ether o la GPU fisica.
+El nucleo C01 conserva su perfil original. Los ciclos posteriores exploran
+capturas y operaciones adicionales por separado, antes de integrarlas con Ether.
 
 ## C02: observar antes de elegir otra representacion
 
@@ -189,8 +189,8 @@ datos, elecciones de control, direcciones, memoria compartida y orden float32.
 
 La [evidencia inicial de C02](evidence/c02/README.md) conserva las capturas completas
 y los contraejemplos. El anfitrion disponible usa llvmpipe sobre CPU. Las pruebas
-en GPU fisica, el estado completo de dispositivo y la minimalidad general
-siguen pendientes. C02 no modifica el nucleo C01.
+en GPU fisica se realizaron despues mediante C03. El estado completo de
+dispositivo y la minimalidad general siguen pendientes. C02 no modifica C01.
 
 ## C03: llevar la prueba al dispositivo fisico
 
@@ -199,3 +199,26 @@ mediante compute shaders OpenGL ES en el telefono, identifica su driver,
 rechaza software/emuladores y exporta capturas e informe. El workflow C03
 construye y valida el APK; el resultado fisico requiere ejecutarlo en el
 dispositivo y revisar el archivo exportado.
+
+La captura recibida del Samsung SM-S166V identifica Mali-G68/ARM y paso la
+verificacion independiente de 24 casos, 26 despachos y 596.680 valores.
+Se reconstruyeron exactamente 118 estados de variables y memoria seleccionada.
+No se capturaron registros fisicos ni el estado completo del dispositivo.
+
+## C04: explotar relaciones y continuar sobre descripciones
+
+[Experimento C04](experiments/c04/README.md): comparte columnas repetidas,
+descubre relaciones afines, residuales, sumas y lecturas indexadas exactas.
+El formato RFS1 conserva todas las identidades y cada dato necesario para
+reconstruir las trazas, sin referencias externas a otros casos.
+
+Sobre el ZIP fisico C03, los bytes de captura bajan de 2.325.288 crudos y
+615.986 TFS2 a **142.273 RFS1**: 93,88 % menos que los datos crudos y 76,90 %
+menos que los filtros anteriores. Estas cifras incluyen todos los esquemas,
+mapas y operandos RFS1; excluyen la compresion ZIP y no son medidas de VRAM.
+
+La continuacion propia agrega tres operaciones mediante 31 bytes de nodos
+por caso y se comprueba contra 15.358 resultados escalares. Las consultas
+individuales no expanden columnas completas; la verificacion si las expande.
+El analisis y la continuacion C04 corren en CPU. No se declara aceleracion
+frente a GPU convencional, nueva ejecucion fisica, ni integracion con C01/XI.
