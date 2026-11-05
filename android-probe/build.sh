@@ -29,7 +29,7 @@ from pathlib import Path
 paths=sorted(Path('src').rglob('*.java'))+sorted(Path('build/gen').rglob('*.java'))
 Path('build/sources.list').write_text('\n'.join(str(p) for p in paths)+'\n')
 PY
-java com.sun.tools.javac.Main -encoding UTF-8 -source 8 -target 8 -bootclasspath "$android_jar" \
+java com.sun.tools.javac.Main -encoding UTF-8 --release 8 -classpath "$android_jar" \
   -d build/classes @build/sources.list
 shopt -s globstar nullglob
 class_files=(build/classes/**/*.class)
