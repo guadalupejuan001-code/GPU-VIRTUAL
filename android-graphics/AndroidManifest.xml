@@ -1,7 +1,7 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="x.gpu.progress" android:versionCode="1" android:versionName="0.3-C07">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="x.gpu.campaign" android:versionCode="1" android:versionName="0.4-C08">
   <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35" />
   <uses-feature android:glEsVersion="0x00030001" android:required="true" />
-  <application android:label="GPU VIRTUAL · Medicion activa" android:theme="@android:style/Theme.Material.NoActionBar" android:allowBackup="false" android:supportsRtl="true">
+  <application android:label="GPU VIRTUAL · Graficos C08" android:theme="@android:style/Theme.Material.NoActionBar" android:allowBackup="false" android:supportsRtl="true">
     <activity android:name="x.gpu.visual.MainActivity" android:exported="true" android:screenOrientation="portrait">
       <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
     </activity>

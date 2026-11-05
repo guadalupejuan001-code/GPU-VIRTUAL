@@ -1,120 +1,159 @@
-# C07: medicion activa y diagnostico de FPS sostenidos
+# C08: graficos compactos contra materializacion CPU y GPU
 
-Instalar **GPU-VIRTUAL-C07-MEDICION-ACTIVA.apk**, elegir la cantidad de luces y
-pulsar **Medir FPS · 60 segundos**. Un panel sustituye la imagen del visor y
-muestra tiempo transcurrido, etapa, cuadros confirmados y ultima ventana de
-FPS calculada. La GPU dibuja en framebuffers de 512 por 512. No se presenta cada cuadro ni se
-espera al refresco entre cuadros dentro del bucle de medicion. Al terminar,
-**Guardar prueba** exporta `GPU-VIRTUAL-C07-RESULTADO.zip`.
+Instalar **GPU-VIRTUAL-C08-GRAFICOS-COMPACTOS.apk** y abrir **Graficos C08**.
+El paquete es `x.gpu.campaign`, separado de C05/C06/C07. No requiere red,
+motores externos ni permisos generales de almacenamiento.
 
-La app C07 usa el paquete `x.gpu.progress` y puede coexistir con C05 y C06.
-Conserva su escena y comparacion de latencia como referencia. La prueba nueva
-usa el mismo perfil de reglas y las mismas excepciones; no integra un motor
-ajeno, RFS1, el nucleo C01 ni Ether.
+## Repetir y buscar trabajo evitable
 
-## Progreso y arranque de C07
+1. Desactivar el ahorro de energia en Android. Si sigue activo, **Medir**
+   ofrece abrir sus ajustes; la app comprueba de nuevo antes del ensayo.
+   No lo desactiva por su cuenta ni cambia relojes o politicas termicas.
+2. Para repetir la carga de C06: **65.536 luces**, **512 x 512**, **lote 8**.
+   Pulsar **Medir 4 metodos** y mantener la app abierta unos 2,5 minutos.
+3. Guardar el ZIP al terminar. Cada ejecucion tiene nombre e identificador
+   unicos con carga, resolucion, lote y hora de inicio para no sobrescribirla.
+4. Para explorar graficos mas exigentes, cambiar una variable cada vez:
+   **HD 1280 x 720**, lote **16**, o hasta **262.144 luces**.
+   Comparar los cuatro metodos dentro de cada perfil, sin mezclar sus tasas.
 
-El ensayo arranca desde el siguiente `onDrawFrame`, con el contexto EGL y sus
-recursos listos. La peticion desde UI solo prepara el estado y solicita ese
-cuadro. C06 lo arrancaba como evento del hilo GL. Tras una espera que parecia
-una pausa, el usuario compartio una captura C06 de ensayo completado: la app
-reporta 197,7 FPS con reglas y 162,9 con datos para 65.536 luces, a 512 por 512.
-El incremento reportado es 21,36 %. La captura no aporta los bloques crudos;
-queda pendiente revisar el ZIP para verificar esos valores independientemente.
+El resultado C06 recibido y verificado contiene 174,8483 FPS con reglas y
+153,5365 con datos CPU (+13,8806 %), con ahorro activo. Fueron doce bloques,
+9.896 cuadros declarados terminados, 524.288 valores comparados con Python y
+dos pares de imagenes byte a byte sin diferencias. El ZIP tiene SHA-256
+`e1c878d6738b67d844f8960cb6b89b131930dfdfc062527a0ec21a0cc6fdef9f`.
+Es una medicion diferente de la captura anterior de 197,7 / 162,9 FPS.
+C08 cambia el protocolo y agrega metodos; repetir la carga no convierte
+el contraste C06/C08 en una ablacion que aisle exclusivamente el ahorro.
 
-Un temporizador del hilo de interfaz lee snapshots Java cada 500 ms. No espera
-una llamada GL ni una nueva confirmacion para actualizarse. El reloj muestra
-tiempo de UI: **por si solo no demuestra que la GPU avance**. Los contadores
-solo aumentan al senalarse el fence real de cada cuadro. Se distinguen todos
-los cuadros confirmados (incluido calentamiento) de los confirmados durante
-medicion; estos ultimos pueden incluir un bloque parcial cancelado y no
-sustituyen la tasa agregada de los bloques completos del resultado final.
+## Cuatro rutas propias
 
-Si pasan al menos cinco segundos de calentamiento/medicion sin una nueva
-confirmacion, se muestra la espera y la ultima operacion: preparar/enviar,
-flush, espera de fence o liberacion. El diagnostico no declara por eso un
-bloqueo del silicio. Durante las verificaciones se muestra su propia etapa.
-Una llamada nativa que no retorna puede retrasar la cancelacion: el monitor
-no termina llamadas del controlador ni inventa cuadros mientras espera.
+| Ruta | Trabajo por cuadro | Datos de escena enviados a la API |
+| --- | --- | ---: |
+| Datos CPU | CPU expande 4 uint32 por luz y sube el buffer | 16*N + 16 B |
+| Reglas | El vertex shader evalua la descripcion | 80 B |
+| Reglas + cache | El mismo shader reutiliza el hash estable por identidad | 80 B, mas cache inicial |
+| Datos GPU | Compute genera el estado completo, barrera y dibujo instanciado | 96 B |
 
-**Guardar diagnostico** captura un JSON incompleto con estos datos y solicita
-detener. El selector de archivos se abre cuando termina el trabajo GL; el ZIP
-parcial queda tambien disponible. No se presenta este JSON como resultado de
-rendimiento. Al iniciar un ensayo se retira el resumen anterior; la prueba
-corta se identifica como latencia en ms para no confundirla con FPS sostenidos.
+La nueva ruta compacta separa `mixWord(id XOR seed)` de los valores que
+dependen del tick y de las excepciones. Conserva un hash de 4 bytes por
+identidad; no conserva sus posiciones y color completos en cada cuadro.
+Su coste es **4*N bytes de cache activa** (262.144 B para 65.536 luces), mas
+el coste de construirla y subirla al crear contexto o ampliar la carga.
+La semilla es fija en este perfil; cambiarla requeriria invalidar la cache.
+Esta cache es derivada: la autoridad XSC1 sigue siendo de 84 bytes.
 
-El panel deja el `GLSurfaceView` montado para mantener la superficie y su
-contexto. Es una mejora de arranque y observabilidad; su funcionamiento en la
-Mali del usuario requiere ejecutar el APK. C06 ya completo el ensayo segun la
-nueva captura. C07 hace visible la espera y no agrega animacion de la escena
-al ensayo ni afirma haber resuelto un bloqueo fisico demostrado.
+La optimizacion evita recalcular esa mezcla estable en cada vertice, pero
+introduce lecturas de memoria. Su ganancia depende del perfil y del chip:
+se mide, no se presupone. Un resultado mas lento se conserva como tal.
 
-## Medicion sostenida
+**Datos GPU** evita la expansion por CPU y las subidas por luz. Despacha
+compute a un anillo de buffers, aplica una barrera de visibilidad para
+atributos y despues dibuja. Cada cuadro del lote tiene su buffer de 16*N bytes;
+se reutilizan solamente cuando todos los fences del lote anterior han terminado.
+El anillo ocupa 16*N*lote bytes: 8 MiB con 65.536 luces y lote 8. Evita la
+dependencia de sobrescribir estado que aun lee el dibujo. Es una referencia mas exigente
+para averiguar si las reglas compactas aportan frente a materializar en GPU.
+Sigue siendo nuestra escena y nuestra implementacion, no una comparacion
+contra la mejor alternativa de todos los motores.
 
-- Cuatro segundos nominales de calentamiento: dos por metodo.
-- Doce bloques de al menos cinco segundos, en orden ABBA/BAAB/ABBA.
-  Cada metodo recibe al menos treinta segundos de tiempo medido.
-- Cada cuadro enviado tiene un `GLsync`. Solo se cuenta al confirmar que
-  ese fence ha terminado. Hay hasta ocho cuadros en el lote de trabajo.
-- La tasa sostenida es **cuadros confirmados / suma de tiempos reales de sus
-  bloques**. No se usa `1000 / tiempo de un cuadro`, ni se promedian tasas
-  de intervalos desiguales, ni se usa la frecuencia de la pantalla.
-- Se guardan todos los bloques, ventanas de aproximadamente un segundo,
-  mejor bloque de cinco segundos y tasa de los ultimos tres bloques por metodo.
-- La duracion total incluye ademas calentamiento, verificacion y guardado.
-  Se puede detener desde la app; salir tambien cancela y guarda lo parcial.
+Las cuatro rutas comparten vertex shader, triangulos, camara, fragment shader,
+resolucion, estados ciclicos y excepciones exactas. Los shaders nuevos
+conservan los mismos valores enteros y la salida del perfil C05.
 
-El bucle completo se ejecuta dentro de un solo `onDrawFrame` del hilo GL,
-antes de devolver el control al visor. Entre sus cuadros no llama a
-`eglSwapBuffers`, ni solicita otro cuadro de pantalla, ni duerme a un FPS
-objetivo. La UI puede actualizar el progreso; ese coste de instrumentacion y
-los controles del driver/sistema siguen formando parte del entorno medido.
+Los bytes declarados son payload logico de escena a la API; no son trafico
+fisico del bus, VRAM total ni consumo energetico. La app comparativa conserva
+ambos buffers densos y el cache en todos los metodos: reserva 16*MAX bytes
+directos en CPU, 32*MAX bytes de buffers densos GPU y 4*MAX de cache GPU,
+ademas de dos framebuffers y costes del driver. MAX=262.144 es una carga
+elegida para este instrumento, no un limite de la representacion o del chip.
+Se agrega el anillo de 16*N*lote bytes, tambien retenido para todas las rutas
+durante la campana. Se declaran por separado cache, buffers de comparacion y anillo.
 
-Antes y despues de medir se verifican ambos framebuffers y todos los valores
-de la escena GPU contra la proyeccion CPU. El ZIP conserva esos datos,
-paquetes XSC1, shaders exactos, bloques y ventanas de tiempo. La lectura y el
-guardado de capturas estan fuera de los intervalos medidos.
+## Protocolo sostenido
 
-Los cuadros usan la misma secuencia ciclica de 64 estados por metodo. La
-animacion del ensayo avanza por cuadro calculado, no por un reloj de pantalla
-a 60 pasos. El numero de cuadros de cada metodo puede diferir porque el tiempo
-de exposicion, la carga y la resolucion son los controles compartidos.
+- Dos segundos de calentamiento por cada uno de los cuatro metodos.
+- Treinta y dos bloques de al menos cuatro segundos, ocho por metodo:
+  al menos **32 segundos medidos por metodo**, 128 segundos en conjunto.
+- Dos rondas de dieciseis bloques. La segunda invierte el orden de la primera.
+  Cada grupo de cuatro contiene todos los metodos y cada metodo tiene la
+  misma posicion media en el orden de bloques. Se usa un orden Williams y su espejo.
+- Cada cuadro tiene un fence y solo se cuenta cuando senala finalizacion.
+  El lote 8 o 16 es comun a todos los metodos del ensayo.
+- Los FPS agregados se recalculan como cuadros / suma de tiempo real.
+  Se conservan bloques, ventanas completas y la cola parcial de cada bloque.
+- Se guardan FPS agregados por ronda, mejor bloque y ultimos tres bloques.
+  Elegir la mejor compacta dentro del ensayo no acredita un ganador universal.
 
-Los FPS de este ensayo representan **rendimiento fuera de pantalla del perfil
-elegido bajo las condiciones actuales del equipo**. No son FPS visibles,
-un maximo universal del chip o un resultado transferible a todos los juegos.
-El mejor bloque tampoco sustituye la tasa sostenida de toda la prueba.
-Se informa por separado de la tasa del visor y los Hz que comunica Android.
-Tambien se registran ahorro de energia y estado termico cuando la API los ofrece.
-No se fuerzan modos de pantalla, frecuencias de reloj ni politicas termicas.
+El ensayo inicia desde un `onDrawFrame` con contexto listo y mantiene el
+bucle completo dentro de ese callback, sin presentar entre cuadros ni dormir
+a una tasa objetivo. El tiempo incluye preparacion CPU, envio, compute si
+corresponde, instrumentacion y espera de fences. Lecturas de validacion,
+cache inicial y ZIP quedan fuera de los bloques medidos y se informan.
 
-La comparacion sigue siendo expansion CPU por cuadro frente a evaluacion
-procedimental GPU. La carga es compartida, con bloques intercalados; no son
-treinta segundos consecutivos aislados por metodo ni una estabilizacion
-termica garantizada. Preparacion CPU, llamadas GL y espera de fences entran
-en el tiempo real. El buffer denso se conserva en ambos metodos para comparar.
+El panel de UI lee snapshots cada 500 ms, con tiempo, etapa, operacion y
+cuadros enviados/confirmados. El reloj solo muestra tiempo: no inventa avance
+GPU ni FPS. Una espera prolongada queda visible. **Detener** guarda lo parcial;
+**Guardar diagnostico** prepara un JSON, solicita detener y abre el selector
+cuando el controlador devuelve el control. No termina llamadas nativas colgadas.
 
-## Verificacion de C07
+Antes y despues se compara la imagen de las otras tres rutas con Datos CPU:
+**seis pares completos**. Tambien se contrastan todos los valores de compute
+directo, compute con cache y el buffer real de Datos GPU con la referencia
+CPU: **24*N palabras**, mas N hashes de la cache. El ZIP guarda cada imagen,
+paquete XSC1, estado GPU, cache, shaders exactos y sus hashes.
+Al finalizar se comprueban ademas todos los buffers reales del ultimo lote de
+Datos GPU: **4*N*lote palabras**. Se guardan sus ticks y hashes, mas el estado
+crudo y XSC1 de su ultima ranura. Esta lectura queda fuera de los tiempos.
 
-`SustainedTest` contrasta tasas ponderadas, bloques desiguales, ausencia de un
-tope de 60, estados vacios y rechazos sin alterar los acumulados. Son 18
-comprobaciones anfitrionas. `verify_host.py` verifica ademas 24 fences GL
-reales sobre llvmpipe CPU, incluidos ocho dibujos en un lote sin presentacion.
-Se mantienen las 690.184 palabras y ocho parejas de imagenes del perfil C05.
-Estas verificaciones y la construccion Android no se declaran ejecucion fisica.
+Se registran ahorro, estado termico de Android, bateria, alimentacion y
+**temperatura de bateria**, que no se etiqueta como temperatura GPU.
+Si aparece ahorro o falta su estado en algun control, el resultado conserva
+la evidencia pero no queda marcado como comparacion de rendimiento elegible.
+El orden compensado reduce sesgos de deriva temporal; no garantiza condiciones
+termicas constantes ni significacion estadistica con solo una campana.
 
-`MonitorTest` comprueba 11 casos de telemetria: tiempo independiente de los
-cuadros, envio sin confirmacion, calentamiento separado, ventanas reales,
-detencion, finalizacion y reinicio sin conservar contadores antiguos.
+Al terminar se selecciona para el visor la ruta compacta mas rapida **en ese
+perfil**. El visor sigue la cadencia de pantalla y usa su propia resolucion;
+esa seleccion no predice sus FPS visibles, los de otros perfiles o juegos.
+El boton **Latencia (2 rutas)** conserva la referencia corta CPU/reglas a
+512 x 512; se etiqueta en ms para distinguirla de la campana.
 
-El control del driver usa `glFenceSync`, `glClientWaitSync` y `glDeleteSync` de
-OpenGL ES. Cada cuadro confirmado sigue teniendo el trabajo de rasterizacion
-de la escena. No se cuentan solo llamadas de envio ni cuadros descartados por
-el propio programa. El driver conserva sus optimizaciones y costes internos.
+## Verificaciones y compilacion de C08
 
-La compilacion sigue usando `bash android-graphics/build.sh` y conserva sus
-validaciones en `android-graphics/build/dist/`. El APK nuevo lleva firma de
-prueba y requiere ejecutarse en el telefono para producir FPS fisicos.
+- Referencia escalar Python frente a Java: 42 estados, 8.184 palabras,
+  dominios hasta 262.144, semillas, overflow y excepciones.
+- `SustainedTest`: 18 controles de tasas ponderadas y acumulados.
+- `MonitorTest`: 11 controles de tiempo, confirmaciones, espera y reinicio.
+- `PlanTest`: 183 controles de cuatro metodos, dos rondas reflejadas,
+  posiciones compensadas, cargas de 512/HD y lotes 8/16.
+- `verify_host.py`: ejecuta los GLSL de produccion en llvmpipe CPU y
+  verifica **12.032.024 palabras de estado**, **827.906 hashes**, doce escenas
+  con cuatro rutas equivalentes y dos imagenes finales de lotes (**38 pares
+  de imagenes**) y 96 fences. Incluye HD y 262.144 luces; prueba dos lotes
+  consecutivos con anillos de 8 y 16 buffers, sin swap.
+
+Estos controles no son una medicion fisica ni demuestran aceleracion en Mali.
+El APK debe ejecutarse en el Samsung para obtener esa evidencia.
+
+```sh
+python3 android-graphics/verify_host.py
+bash android-graphics/build.sh
+```
+
+El build usa Android SDK 35 y build-tools 35.0.0, javac, aapt2, d8, zipalign y
+apksigner. Conserva firma, paquete, APK y validaciones en build/dist, con
+`hardware_gpu_executed=false` para sus controles anfitriones.
+
+C08 no cambia el nucleo C01, no integra automaticamente Ether/XI o RFS1, ni
+ejecuta shaders arbitrarios. Lleva el principio de estado compacto a una
+comparacion grafica propia mas exigente y lista para probarse en el dispositivo.
+
+Referencias de API, sin copiar implementaciones:
+- https://developer.android.com/reference/android/provider/Settings#ACTION_BATTERY_SAVER_SETTINGS
+- https://developer.android.com/reference/android/os/PowerManager#isPowerSaveMode()
+- https://wikis.khronos.org/opengl/GLAPI/glMemoryBarrier
+- https://registry.khronos.org/OpenGL/specs/es/3.1/es_spec_3.1.pdf (seccion 7.11)
 
 ## Antecedente C05: Campo de luz
 

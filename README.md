@@ -253,8 +253,8 @@ siguen requiriendo que se ejecute el nuevo APK fisicamente.
 
 Una captura posterior del usuario muestra C06 completado en la Mali-G68:
 197,7 FPS sostenidos con reglas y 162,9 con datos para 65.536 luces a 512 por
-512 (+21,36 % de cuadros/s). Son valores reportados por la app en la captura;
-la revision independiente de los bloques del ZIP sigue pendiente.
+512 (+21,36 % de cuadros/s). Son valores de esa captura. El ZIP recibido
+despues contiene otra medicion, verificada y detallada en C08.
 
 ## C07: progreso visible y arranque con contexto listo
 
@@ -269,4 +269,30 @@ comparacion corta por separado y se limpia el resultado anterior al iniciar.
 El APK C07 puede coexistir con las versiones previas. Las pruebas anfitrionas
 comprueban los contadores; el panel nuevo requiere ejecutarse en el telefono.
 C06 ya completo el ensayo segun la nueva captura; C07 aclara su espera.
+
+## C08: graficos compactos frente a expansion en CPU y GPU
+
+La [campana grafica Android](android-graphics/README.md) agrega una ruta de
+reglas con cache derivada de 4 bytes por identidad y una referencia que
+materializa el estado en un anillo GPU antes de dibujar. Las cuatro rutas
+comparten escena y salida. Permite 512 x 512 o HD 1280 x 720, lotes de 8/16
+y cargas de hasta 262.144 luces, como perfiles de este instrumento.
+
+Dos rondas reflejadas compensan el orden de los metodos: 32 bloques y al
+menos 32 s medidos por metodo, con ventanas completas, controles de energia,
+progreso y archivos de resultado unicos. Antes y despues se comprueban seis
+pares de imagenes, 24*N palabras de estado GPU y N hashes de cache.
+La mejor ruta compacta del perfil se selecciona al terminar para el visor.
+
+El ZIP C06 recibido tiene SHA-256
+`e1c878d6738b67d844f8960cb6b89b131930dfdfc062527a0ec21a0cc6fdef9f`.
+Su revision independiente recalculo 174,8483 FPS con reglas y 153,5365 con
+datos CPU (+13,8806 %), con ahorro activo, 524.288 valores correctos y dos
+pares de imagenes exactos. Es otra medicion distinta a la captura previa.
+
+En C08 los controles software verifican 12.032.024 palabras, 827.906 hashes y
+38 pares de imagenes, con 96 fences. El APK nuevo requiere ejecutarse en el telefono para
+medir si la cache ayuda y como se compara con materializar el estado en GPU.
+No se declara un maximo universal, una mejora de RAM total o una integracion
+automatica con otros proyectos. El coste de cache y expansion queda explicito.
 

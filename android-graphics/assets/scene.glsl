@@ -6,8 +6,8 @@ uint mixWord(uint x) {
     x^=x>>16u;x*=0x7feb352du;x^=x>>15u;x*=0x846ca68bu;x^=x>>16u;return x;
 }
 uint triangle(uint x){uint p=x&511u;return p<256u?p:511u-p;}
-uvec4 sceneValue(uint id) {
-    uint t=parameters.y,h=mixWord(id^parameters.z);
+uvec4 sceneValueFromHash(uint id,uint h) {
+    uint t=parameters.y;
     uint x=((id&63u)*16u+(triangle(t+(h&255u))>>2u))&1023u;
     uint y=(((id>>6u)&63u)*16u+(triangle(t*3u+((h>>8u)&255u))>>2u))&1023u;
     uint z=(((id>>12u)&31u)*32u+triangle(t+((h>>16u)&255u))*4u)&1023u;
@@ -17,3 +17,5 @@ uvec4 sceneValue(uint id) {
     }
     return uvec4(x,y,z,color);
 }
+uvec4 sceneValue(uint id){return sceneValueFromHash(id,mixWord(id^parameters.z));}
+

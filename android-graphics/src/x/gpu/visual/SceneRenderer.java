@@ -37,19 +37,22 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
     private final AssetManager assets;
     private final File cache;
     private final Listener listener;
-    private volatile int mode=1,objects=65536;
+    private volatile int mode=2,objects=65536;
     private volatile boolean benchmarkRequested;
     private volatile boolean stopRequested;
     private boolean sustainedRunning;
     private volatile PendingSustained sustainedRequest;
     private final ProbeMonitor monitor=new ProbeMonitor();
     private static final class PendingSustained {
-        final int count;final DeviceInfo info;
-        PendingSustained(int count,DeviceInfo info){this.count=count;this.info=info;}
+        final int count;final DeviceInfo info;final BenchmarkPlan plan;
+        PendingSustained(int count,DeviceInfo info,BenchmarkPlan plan){this.count=count;this.info=info;this.plan=plan;}
     }
-    private int width=1,height=1,program,compute,vbo,vao;
+    private int width=1,height=1,program,compute,vbo,vao,gpuVbo,hashVbo,hashCount;
+    private int targetWidth=512,targetHeight=512,computeParamsAt,computeDetailsAt,computeCachedAt;
+    private long hashSetupNs;
     private int paramsAt,detailsAt,modeAt,cameraAt,viewportAt;
     private final int[] framebuffers=new int[2],textures=new int[2];
+    private final int[] gpuSlots=new int[16];
     private ByteBuffer denseBytes;
     private IntBuffer denseInts;
     private String renderer="Sin identificar",vendor="",version="";
@@ -58,18 +61,18 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
     private int liveFrames;
     private Bench bench;
     private String vertexSource,fragmentSource,computeSource;
-    private static final int MAX_OBJECTS=65536,SIDE=512,SSBO=0x90D2;
+    private static final int MAX_OBJECTS=262144,SIDE=512,SSBO=0x90D2;
     private static final int SEED=0x00c0511a;
     public SceneRenderer(AssetManager assets,File cache,Listener listener){this.assets=assets;this.cache=cache;this.listener=listener;}
     public int mode(){return mode;}
-    public void mode(int value){mode=value==0?0:1;liveStart=0;liveFrames=0;}
-    public void objects(int value){if(value<1||value>MAX_OBJECTS)throw new IllegalArgumentException("Fuera del perfil C05");objects=value;liveStart=0;liveFrames=0;}
+    public void mode(int value){if(value<0||value>=BenchmarkPlan.ROUTES)throw new IllegalArgumentException("Metodo desconocido");mode=value;liveStart=0;liveFrames=0;}
+    public void objects(int value){if(value<1||value>MAX_OBJECTS)throw new IllegalArgumentException("Fuera de la carga de este instrumento");objects=value;liveStart=0;liveFrames=0;}
     public void compare(){benchmarkRequested=true;}
     public ProbeMonitor.Snapshot probe(){return monitor.snapshot(System.nanoTime());}
     /** No hace llamadas GL desde la UI: el siguiente onDrawFrame inicia el ensayo. */
-    public void requestSustained(int count,DeviceInfo info){
+    public void requestSustained(int count,DeviceInfo info,BenchmarkPlan plan){
         need(count>=1&&count<=MAX_OBJECTS,"Carga fuera de la demo");
-        stopRequested=false;monitor.queue(count,System.nanoTime());sustainedRequest=new PendingSustained(count,info);
+        stopRequested=false;monitor.queue(count,System.nanoTime());sustainedRequest=new PendingSustained(count,info,plan);
     }
     public void requestStop(){stopRequested=true;monitor.requestStop();}
     public void cancel(){if(bench!=null)bench.fail(new IllegalStateException("Comparacion interrumpida al salir de la escena"));benchmarkRequested=false;}
@@ -112,9 +115,11 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
             need(ByteOrder.nativeOrder()==ByteOrder.LITTLE_ENDIAN,"El perfil requiere orden de bytes little-endian");
             String common=asset("scene.glsl");
             vertexSource="#version 310 es\n"+common+"\n"+asset("vertex.glsl");fragmentSource=asset("fragment.glsl");
-            computeSource="#version 310 es\n"+common+"\nlayout(local_size_x=64) in;\nlayout(std430,binding=0) writeonly buffer Values { uvec4 values[]; };\nvoid main(){uint id=gl_GlobalInvocationID.x;if(id<parameters.x)values[id]=sceneValue(id);}\n";
+            computeSource="#version 310 es\n"+common+"\n"+asset("compute.glsl");
             program=link(shader(GLES30.GL_VERTEX_SHADER,vertexSource),shader(GLES30.GL_FRAGMENT_SHADER,fragmentSource));
             compute=link(shader(GLES31.GL_COMPUTE_SHADER,computeSource));
+            computeParamsAt=GLES30.glGetUniformLocation(compute,"parameters");computeDetailsAt=GLES30.glGetUniformLocation(compute,"details[0]");computeCachedAt=GLES30.glGetUniformLocation(compute,"cachedMode");
+            need(computeParamsAt>=0&&computeDetailsAt>=0&&computeCachedAt>=0,"Faltan parametros compute");
             paramsAt=GLES30.glGetUniformLocation(program,"parameters");detailsAt=GLES30.glGetUniformLocation(program,"details[0]");
             modeAt=GLES30.glGetUniformLocation(program,"compactMode");cameraAt=GLES30.glGetUniformLocation(program,"camera");viewportAt=GLES30.glGetUniformLocation(program,"viewportSize");
             need(paramsAt>=0&&detailsAt>=0&&modeAt>=0&&cameraAt>=0&&viewportAt>=0,"Faltan parametros de la escena");
@@ -122,19 +127,48 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
             GLES30.glGenBuffers(1,ids,0);vbo=ids[0];GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER,vbo);
             GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER,MAX_OBJECTS*16,null,GLES30.GL_STREAM_DRAW);
             denseBytes=ByteBuffer.allocateDirect(MAX_OBJECTS*16).order(ByteOrder.LITTLE_ENDIAN);denseInts=denseBytes.asIntBuffer();
+            GLES30.glGenBuffers(1,ids,0);gpuVbo=ids[0];GLES30.glBindBuffer(SSBO,gpuVbo);GLES30.glBufferData(SSBO,MAX_OBJECTS*16,null,GLES30.GL_DYNAMIC_DRAW);
+            GLES30.glGenBuffers(gpuSlots.length,gpuSlots,0);
+            GLES30.glGenBuffers(1,ids,0);hashVbo=ids[0];GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER,hashVbo);GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER,MAX_OBJECTS*4,null,GLES30.GL_STATIC_DRAW);
+            hashCount=0;hashSetupNs=0;prepareHashCache(objects);
             GLES30.glGenFramebuffers(2,framebuffers,0);GLES30.glGenTextures(2,textures,0);
+            ensureTargets(SIDE,SIDE);
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER,0);check();
+            animationStart=System.nanoTime();liveStart=0;liveFrames=0;lastLive=0;
+        } catch(Exception error){fatal=true;sustainedRequest=null;monitor.finish("ERROR",error.toString(),System.nanoTime());listener.failure("No se pudo abrir la escena:\n"+error);}
+    }
+    private void ensureTargets(int w,int h) {
+            targetWidth=w;targetHeight=h;
             for(int i=0;i<2;i++) {
                 GLES30.glBindTexture(GLES30.GL_TEXTURE_2D,textures[i]);
                 GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D,GLES30.GL_TEXTURE_MIN_FILTER,GLES30.GL_NEAREST);
                 GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D,GLES30.GL_TEXTURE_MAG_FILTER,GLES30.GL_NEAREST);
-                GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D,0,GLES30.GL_RGBA8,SIDE,SIDE,0,GLES30.GL_RGBA,GLES30.GL_UNSIGNED_BYTE,null);
+                GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D,0,GLES30.GL_RGBA8,w,h,0,GLES30.GL_RGBA,GLES30.GL_UNSIGNED_BYTE,null);
                 GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER,framebuffers[i]);
                 GLES30.glFramebufferTexture2D(GLES30.GL_FRAMEBUFFER,GLES30.GL_COLOR_ATTACHMENT0,GLES30.GL_TEXTURE_2D,textures[i],0);
                 need(GLES30.glCheckFramebufferStatus(GLES30.GL_FRAMEBUFFER)==GLES30.GL_FRAMEBUFFER_COMPLETE,"Framebuffer incompleto");
             }
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER,0);check();
-            animationStart=System.nanoTime();liveStart=0;liveFrames=0;lastLive=0;
-        } catch(Exception error){fatal=true;sustainedRequest=null;monitor.finish("ERROR",error.toString(),System.nanoTime());listener.failure("No se pudo abrir la escena:\n"+error);}
+    }
+    private void prepareHashCache(int n) {
+        if(hashCount>=n)return;long start=System.nanoTime();ByteBuffer bytes=ByteBuffer.allocateDirect(n*4).order(ByteOrder.LITTLE_ENDIAN);
+        for(int id=0;id<n;id++)bytes.putInt(SceneState.mix(id^SEED));bytes.flip();
+        GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER,hashVbo);GLES30.glBufferSubData(GLES30.GL_ARRAY_BUFFER,0,n*4,bytes);
+        hashCount=n;hashSetupNs+=System.nanoTime()-start;check();
+    }
+    private void prepareGpuSlots(int n,int depth) {
+        GLES31.glMemoryBarrier(0x200);GLES30.glFinish();
+        for(int i=0;i<gpuSlots.length;i++){GLES30.glBindBuffer(SSBO,gpuSlots[i]);GLES30.glBufferData(SSBO,i<depth?n*16:0,null,GLES30.GL_DYNAMIC_DRAW);}
+        check();
+    }
+    private void dispatchValues(SceneState scene,int buffer,boolean cached){dispatchValues(scene,buffer,cached,false);}
+    private void dispatchValues(SceneState scene,int buffer,boolean cached,boolean priorBatchCompleted) {
+        // ES 3.1 section 7.11: finish earlier vertex fetches before overwriting their SSBO storage.
+        // Timed ring slots are only reused after every fence in their prior batch signaled.
+        if(!priorBatchCompleted)GLES31.glMemoryBarrier(0x2000);
+        GLES31.glUseProgram(compute);GLES31.glBindBufferBase(SSBO,0,buffer);GLES31.glBindBufferBase(SSBO,1,hashVbo);
+        GLES31.glUniform4uiv(computeParamsAt,1,scene.parameters(),0);GLES31.glUniform4uiv(computeDetailsAt,4,scene.details,0);GLES31.glUniform1i(computeCachedAt,cached?1:0);
+        GLES31.glDispatchCompute((scene.count+63)/64,1,1);GLES31.glMemoryBarrier(0x1);
     }
     @Override public void onSurfaceChanged(GL10 unused,int w,int h){width=Math.max(1,w);height=Math.max(1,h);}
     private static final class Sample {
@@ -144,21 +178,28 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
         JSONObject json()throws Exception{return new JSONObject().put("prepare_ms",preparationMs).put("submit_and_finish_ms",submissionFinishMs).put("complete_frame_ms",totalMs);}
     }
     private Sample draw(int route,int n,int tick,int target,int w,int h,boolean finish) {
+        return draw(route,n,tick,target,w,h,finish,gpuVbo,false);
+    }
+    private Sample draw(int route,int n,int tick,int target,int w,int h,boolean finish,int stateBuffer,boolean priorBatchCompleted) {
         long begin=System.nanoTime();SceneState scene=new SceneState(n,tick,SEED);
         if(route==0){scene.materialize(denseInts);denseBytes.position(0);denseBytes.limit(n*16);}
+        if(route==2)prepareHashCache(n);
         long prepared=System.nanoTime();
+        if(route==3)dispatchValues(scene,stateBuffer,false,priorBatchCompleted);
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER,target);GLES30.glViewport(0,0,w,h);
         GLES30.glDisable(GLES30.GL_DEPTH_TEST);GLES30.glDisable(GLES30.GL_CULL_FACE);GLES30.glDisable(GLES30.GL_DITHER);GLES30.glDisable(GLES30.GL_SCISSOR_TEST);
         GLES30.glEnable(GLES30.GL_BLEND);GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA,GLES30.GL_ONE);
         GLES30.glClearColor(0.007f,0.012f,0.035f,1);GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT);
         GLES30.glUseProgram(program);GLES30.glBindVertexArray(vao);
         GLES30.glUniform1i(modeAt,route);GLES30.glUniform4uiv(paramsAt,1,scene.parameters(),0);
-        if(route==0) {
-            GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER,vbo);GLES30.glBufferSubData(GLES30.GL_ARRAY_BUFFER,0,n*16,denseBytes);
+        GLES30.glDisableVertexAttribArray(1);GLES30.glVertexAttribI4ui(1,0,0,0,0);
+        if(route==0||route==3) {
+            GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER,route==0?vbo:stateBuffer);if(route==0)GLES30.glBufferSubData(GLES30.GL_ARRAY_BUFFER,0,n*16,denseBytes);
             GLES30.glEnableVertexAttribArray(0);GLES30.glVertexAttribIPointer(0,4,GLES30.GL_UNSIGNED_INT,16,0);GLES30.glVertexAttribDivisor(0,1);
         } else {
             GLES30.glDisableVertexAttribArray(0);GLES30.glVertexAttribI4ui(0,0,0,0,0);
             GLES30.glUniform4uiv(detailsAt,4,scene.details,0);
+            if(route==2){GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER,hashVbo);GLES30.glEnableVertexAttribArray(1);GLES30.glVertexAttribIPointer(1,1,GLES30.GL_UNSIGNED_INT,4,0);GLES30.glVertexAttribDivisor(1,1);}
         }
         double angle=tick*0.003,tilt=0.23+Math.sin(tick*0.001)*0.18;
         GLES30.glUniform4f(cameraAt,(float)Math.cos(angle),(float)Math.sin(angle),(float)Math.cos(tilt),(float)Math.sin(tilt));
@@ -173,7 +214,7 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
         }
         try {
             PendingSustained pending=sustainedRequest;
-            if(pending!=null){sustainedRequest=null;sustained(pending.count,pending.info);return;}
+            if(pending!=null){sustainedRequest=null;sustained(pending.count,pending.info,pending.plan);return;}
             if(benchmarkRequested&&bench==null){benchmarkRequested=false;bench=new Bench();}
             if(bench!=null){bench.step();return;}
             long now=System.nanoTime();int tick=(int)(((now-animationStart)*60)/1_000_000_000L);
@@ -181,27 +222,29 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
             if(liveStart==0){liveStart=now;liveFrames=0;}liveFrames++;
             if(now-lastLive>=1_000_000_000L) {
                 double fps=(now>liveStart&&liveFrames>1)?(liveFrames-1)*1e9/(now-liveStart):0;
-                long bytes=mode==0?16L*objects+16:80;
-                listener.live(String.format(Locale.ROOT,"%s · %,d luces\n%s · %.1f FPS visor · %,d B de escena/cuadro",renderer,objects,mode==1?"REGLAS + CAMBIOS":"DATOS COMPLETOS",fps,bytes));
+                long bytes=mode==0?16L*objects+16:mode==3?96:80;
+                listener.live(String.format(Locale.ROOT,"%s · %,d luces\n%s · %.1f FPS visor · %,d B enviados/cuadro%s",renderer,objects,BenchmarkPlan.name(mode),fps,bytes,mode==2?" · cache "+(objects*4L)+" B":""));
                 lastLive=now;liveStart=now;liveFrames=1;
             }
         }catch(Exception error){if(bench!=null)bench.fail(error);else{fatal=true;listener.failure("Error de dibujo:\n"+error);}}
     }
     private byte[] pixels(int framebuffer) {
-        ByteBuffer out=ByteBuffer.allocateDirect(SIDE*SIDE*4);GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER,framebuffer);
-        GLES30.glReadPixels(0,0,SIDE,SIDE,GLES30.GL_RGBA,GLES30.GL_UNSIGNED_BYTE,out);check();
+        ByteBuffer out=ByteBuffer.allocateDirect(targetWidth*targetHeight*4);GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER,framebuffer);
+        GLES30.glReadPixels(0,0,targetWidth,targetHeight,GLES30.GL_RGBA,GLES30.GL_UNSIGNED_BYTE,out);check();
         byte[] bytes=new byte[out.capacity()];out.position(0);out.get(bytes);return bytes;
     }
-    private byte[] computeValues(SceneState scene) {
+    private byte[] computeValues(SceneState scene){return computeValues(scene,false);}
+    private byte[] readBuffer(int buffer,int bytes) {
+        GLES31.glMemoryBarrier(0x200);GLES30.glFinish();GLES30.glBindBuffer(SSBO,buffer);
+        Buffer mapped=GLES30.glMapBufferRange(SSBO,0,bytes,GLES30.GL_MAP_READ_BIT);
+        need(mapped instanceof ByteBuffer,"No se pudo leer el buffer GPU");byte[] result=new byte[bytes];((ByteBuffer)mapped).position(0);((ByteBuffer)mapped).get(result);
+        need(GLES30.glUnmapBuffer(SSBO),"Buffer invalido");check();return result;
+    }
+    private byte[] computeValues(SceneState scene,boolean cached) {
         int[] ids=new int[1];GLES30.glGenBuffers(1,ids,0);int id=ids[0];
         try {
-            GLES31.glBindBuffer(SSBO,id);GLES31.glBufferData(SSBO,scene.count*16,null,GLES30.GL_STREAM_DRAW);GLES31.glBindBufferBase(SSBO,0,id);
-            GLES31.glUseProgram(compute);GLES31.glUniform4uiv(GLES31.glGetUniformLocation(compute,"parameters"),1,scene.parameters(),0);
-            GLES31.glUniform4uiv(GLES31.glGetUniformLocation(compute,"details[0]"),4,scene.details,0);
-            GLES31.glDispatchCompute((scene.count+63)/64,1,1);GLES31.glMemoryBarrier(0x2000|0x200);GLES31.glFinish();
-            Buffer mapped=GLES30.glMapBufferRange(SSBO,0,scene.count*16,GLES30.GL_MAP_READ_BIT);
-            need(mapped instanceof ByteBuffer,"No se pudo leer la escena calculada");byte[] result=new byte[scene.count*16];((ByteBuffer)mapped).position(0);((ByteBuffer)mapped).get(result);
-            need(GLES30.glUnmapBuffer(SSBO),"Buffer invalido");check();return result;
+            GLES31.glBindBuffer(SSBO,id);GLES31.glBufferData(SSBO,scene.count*16,null,GLES30.GL_STREAM_DRAW);
+            dispatchValues(scene,id,cached);return readBuffer(id,scene.count*16);
         }finally{GLES30.glDeleteBuffers(1,ids,0);}
     }
     private static double percentile(double[] values,double q){double[] copy=values.clone();Arrays.sort(copy);double at=q*(copy.length-1);int low=(int)Math.floor(at),high=(int)Math.ceil(at);return copy[low]+(copy[high]-copy[low])*(at-low);}
@@ -211,13 +254,13 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
     }
     public interface DeviceInfo { JSONObject read()throws Exception; }
     /** Arranca desde onDrawFrame con contexto y superficie listos; no presenta en su bucle. */
-    private void sustained(int n,DeviceInfo deviceInfo) {
+    private void sustained(int n,DeviceInfo deviceInfo,BenchmarkPlan plan) {
         if(sustainedRunning)return;
         sustainedRunning=true;
         try {
             monitor.phase("STARTING",-1,-1,System.nanoTime());
             need(!fatal&&program!=0&&android.opengl.EGL14.eglGetCurrentContext()!=android.opengl.EGL14.EGL_NO_CONTEXT,"Espera a que aparezca la escena antes de medir");need(bench==null,"Ya hay una prueba activa");
-            new Sustained(n,deviceInfo).run();
+            new Sustained(n,deviceInfo,plan).run();
         } catch(Exception error){monitor.finish("ERROR",error.toString(),System.nanoTime());listener.failure("No se pudo completar la prueba sostenida: "+error);}
         finally{sustainedRunning=false;liveStart=0;liveFrames=0;}
     }
@@ -229,19 +272,18 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
             .put("latest_window_fps",s.windowFps<0?JSONObject.NULL:s.windowFps).put("message",s.message);
     }
     public JSONObject diagnostic()throws Exception {
-        return new JSONObject().put("format","GPU-VIRTUAL-C07-diagnostic-v1").put("source_commit",BuildInfo.SOURCE_SHA)
+        return new JSONObject().put("format","GPU-VIRTUAL-C08-diagnostic-v1").put("source_commit",BuildInfo.SOURCE_SHA)
             .put("completed_benchmark_result",false).put("hardware_sustained_test_passed",false).put("device",Build.MODEL)
             .put("monitor",monitorJson(probe())).put("scope","UI snapshot only; elapsed timer is not evidence of GPU progress. Frames increment only after signaled GLsync.");
     }
     private void continuing(){if(stopRequested)throw new CancellationException("Prueba interrumpida");}
-    private int finishBatch(int route,int n,long firstFrame) {
-        final int batchSize=8;
+    private int finishBatch(int route,int n,long firstFrame,int batchSize) {
         long[] fences=new long[batchSize];int submitted=0,finished=0;
         try {
             for(int j=0;j<batchSize;j++) {
                 continuing();int tick=1024+(int)((firstFrame+j)%64)*8;
                 monitor.operation("PREPARE_AND_SUBMIT",System.nanoTime());
-                draw(route,n,tick,framebuffers[route],SIDE,SIDE,false);
+                draw(route,n,tick,framebuffers[route&1],targetWidth,targetHeight,false,route==3?gpuSlots[j]:gpuVbo,route==3);
                 fences[j]=GLES30.glFenceSync(GLES30.GL_SYNC_GPU_COMMANDS_COMPLETE,0);
                 need(fences[j]!=0,"No se pudo crear la confirmacion GPU");submitted++;monitor.submitted();
             }
@@ -264,111 +306,174 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
     private final class Sustained {
         final int n;
         final DeviceInfo deviceInfo;
-        final File archive=new File(cache,"GPU-VIRTUAL-C07-RESULTADO.zip");
+        final BenchmarkPlan plan;
+        final String runId=Long.toString(System.currentTimeMillis());
+        final File archive;
         final ZipOutputStream zip;
         final JSONObject report=new JSONObject();
         final JSONArray blocks=new JSONArray(),windows=new JSONArray(),captures=new JSONArray();
-        final SustainedStats stats=new SustainedStats();
-        final int[] order={0,1,1,0,1,0,0,1,0,1,1,0};
-        final long[] frameIndex={0,0};
+        final SustainedStats totals=new SustainedStats(BenchmarkPlan.ROUTES);
+        final long[] frameIndex=new long[BenchmarkPlan.ROUTES];
         int validatedPairs;
         long verifiedWords;
-        Sustained(int n,DeviceInfo deviceInfo)throws Exception {
-            this.n=n;this.deviceInfo=deviceInfo;
-            need(n>=1&&n<=MAX_OBJECTS,"Carga fuera de la demo");
+        long ringVerifiedWords;
+        boolean powerFree=true;
+        Sustained(int n,DeviceInfo deviceInfo,BenchmarkPlan plan)throws Exception {
+            this.n=n;this.deviceInfo=deviceInfo;this.plan=plan;
+            need(n>=1&&n<=MAX_OBJECTS,"Carga fuera del instrumento");
+            archive=new File(cache,"GPU-VIRTUAL-C08-"+n+"-"+plan.width+"x"+plan.height+"-B"+plan.pipeline+"-"+runId+".zip");
             zip=new ZipOutputStream(new FileOutputStream(archive));zip.setLevel(1);
         }
         void put(String name,byte[] value)throws Exception{zip.putNextEntry(new ZipEntry(name));zip.write(value);zip.closeEntry();}
+        JSONObject device()throws Exception {
+            JSONObject value=deviceInfo.read();
+            if(!value.has("power_save_mode")||value.optBoolean("power_save_mode",true))powerFree=false;
+            return value;
+        }
         void validate(String prefix,int tick)throws Exception {
             monitor.phase(prefix.equals("before")?"VALIDATING_BEFORE":"VALIDATING_AFTER",-1,-1,System.nanoTime());
-            monitor.operation("VERIFY_IMAGES_AND_STATE",System.nanoTime());
-            continuing();Sample a=draw(0,n,tick,framebuffers[0],SIDE,SIDE,true);
-            draw(1,n,tick,framebuffers[1],SIDE,SIDE,true);
-            byte[] first=pixels(framebuffers[0]),second=pixels(framebuffers[1]);
-            put(prefix+"-dense.rgba",first);put(prefix+"-compact.rgba",second);put(prefix+".xscene",a.scene.packet());
-            need(Arrays.equals(first,second),"La imagen de los dos metodos difiere");
-            byte[] actual=computeValues(a.scene);a.scene.materialize(denseInts);denseBytes.position(0);denseBytes.limit(n*16);
-            byte[] expected=new byte[n*16];denseBytes.get(expected);put(prefix+"-gpu-state.u32",actual);
-            need(Arrays.equals(actual,expected),"Los datos de GPU y CPU difieren");
-            captures.put(new JSONObject().put("prefix",prefix).put("tick",tick).put("n",n).put("image_sha256",sha(first)).put("state_sha256",sha(actual)));
-            validatedPairs++;verifiedWords+=n*4L;
+            monitor.operation("VERIFY_IMAGES_AND_STATE",System.nanoTime());continuing();
+            Sample dense=draw(0,n,tick,framebuffers[0],plan.width,plan.height,true);
+            byte[] image=pixels(framebuffers[0]);put(prefix+"-dense.rgba",image);put(prefix+".xscene",dense.scene.packet());
+            dense.scene.materialize(denseInts);denseBytes.position(0);denseBytes.limit(n*16);
+            byte[] expected=new byte[n*16];denseBytes.get(expected);
+            JSONArray states=new JSONArray();
+            for(int route=1;route<BenchmarkPlan.ROUTES;route++) {
+                continuing();draw(route,n,tick,framebuffers[route&1],plan.width,plan.height,true);
+                byte[] actualImage=pixels(framebuffers[route&1]);put(prefix+"-route"+route+".rgba",actualImage);
+                need(Arrays.equals(image,actualImage),"Imagen distinta: "+BenchmarkPlan.name(route));validatedPairs++;
+                byte[] state=route==3?readBuffer(gpuVbo,n*16):computeValues(dense.scene,route==2);
+                put(prefix+"-route"+route+"-gpu-state.u32",state);
+                need(Arrays.equals(expected,state),"Estado distinto: "+BenchmarkPlan.name(route));verifiedWords+=n*4L;
+                states.put(new JSONObject().put("route",route).put("state_sha256",sha(state)));
+            }
+            captures.put(new JSONObject().put("prefix",prefix).put("tick",tick).put("n",n).put("image_sha256",sha(image)).put("states",states));
         }
         void warm(int route)throws Exception {
             monitor.phase("WARMUP",route,-1,System.nanoTime());monitor.operation("WAIT_PREVIOUS",System.nanoTime());
-            continuing();listener.progress((route==0?"Datos por luz":"Reglas + cambios")+" · calentamiento 2 s");
+            continuing();listener.progress(BenchmarkPlan.name(route)+" · calentamiento 2 s");
             GLES30.glFinish();long begin=System.nanoTime(),frames=0;
-            do{frames+=finishBatch(route,n,frames);}while(System.nanoTime()-begin<2_000_000_000L);
+            do{frames+=finishBatch(route,n,frames,plan.pipeline);}while(System.nanoTime()-begin<2_000_000_000L);
+        }
+        void validateTimedRing()throws Exception {
+            monitor.phase("VALIDATING_RING",3,-1,System.nanoTime());monitor.operation("VERIFY_IMAGES_AND_STATE",System.nanoTime());
+            JSONArray slots=new JSONArray();
+            for(int slot=0;slot<plan.pipeline;slot++) {
+                continuing();int tick=1024+(int)((frameIndex[3]-plan.pipeline+slot)%64)*8;
+                SceneState scene=new SceneState(n,tick,SEED);scene.materialize(denseInts);denseBytes.position(0);denseBytes.limit(n*16);
+                byte[] expected=new byte[n*16];denseBytes.get(expected);byte[] actual=readBuffer(gpuSlots[slot],n*16);
+                need(Arrays.equals(expected,actual),"Buffer del lote GPU distinto: "+slot);ringVerifiedWords+=n*4L;
+                slots.put(new JSONObject().put("slot",slot).put("tick",tick).put("state_sha256",sha(actual)));
+                if(slot==plan.pipeline-1){put("gpu-ring-last.xscene",scene.packet());put("gpu-ring-last.u32",actual);}
+            }
+            report.put("timed_gpu_ring_final_slots",slots);
+        }
+        void window(int phase,int route,long frames,long elapsed,boolean full)throws Exception {
+            windows.put(new JSONObject().put("block",phase).put("route",route).put("round",plan.round(phase)).put("frames_completed",frames)
+                .put("elapsed_ns",elapsed).put("fps",frames*(1e9/elapsed)).put("full_second_window",full));
         }
         void measure(int phase,int route)throws Exception {
             monitor.phase("MEASURING",route,phase,System.nanoTime());monitor.operation("WAIT_PREVIOUS",System.nanoTime());
-            continuing();GLES30.glFinish();
-            JSONObject before=deviceInfo.read();long start=System.nanoTime(),last=start,windowFrames=0,frames=0;
-            while(System.nanoTime()-start<5_000_000_000L) {
-                int completed=finishBatch(route,n,frameIndex[route]);frameIndex[route]+=completed;
+            continuing();GLES30.glFinish();JSONObject before=device();
+            long start=System.nanoTime(),last=start,windowFrames=0,frames=0;
+            while(System.nanoTime()-start<BenchmarkPlan.BLOCK_NS) {
+                int completed=finishBatch(route,n,frameIndex[route],plan.pipeline);frameIndex[route]+=completed;
                 frames+=completed;windowFrames+=completed;long now=System.nanoTime();
                 if(now-last>=1_000_000_000L) {
-                    double rate=windowFrames*(1e9/(now-last));
-                    monitor.window(rate);
-                    windows.put(new JSONObject().put("block",phase).put("route",route).put("frames_completed",windowFrames).put("elapsed_ns",now-last).put("fps",rate));
-                    listener.progress(String.format(Locale.ROOT,"%s · bloque %d / 12\n%.1f FPS calculados · %d cuadros terminados\n512 × 512 · sin presentar cuadros",route==1?"Reglas + cambios":"Datos por luz",phase+1,rate,frames));
+                    double rate=windowFrames*(1e9/(now-last));window(phase,route,windowFrames,now-last,true);monitor.window(rate);
+                    listener.progress(String.format(Locale.ROOT,"%s · ronda %d / 2 · bloque %d / %d\n%.1f FPS calculados · %d cuadros terminados\n%s · sin presentar cuadros",BenchmarkPlan.name(route),plan.round(phase)+1,phase+1,BenchmarkPlan.BLOCKS,rate,frames,plan.label()));
                     last=now;windowFrames=0;
                 }
             }
-            long elapsed=System.nanoTime()-start;
-            continuing();stats.add(route,frames,elapsed);
-            blocks.put(new JSONObject().put("block",phase).put("route",route).put("frames_completed",frames).put("elapsed_ns",elapsed)
-                    .put("fps",frames*(1e9/elapsed)).put("device_before",before).put("device_after",deviceInfo.read()));
+            long end=System.nanoTime(),elapsed=end-start;
+            if(end>last)window(phase,route,windowFrames,end-last,false);
+            continuing();totals.add(route,frames,elapsed);
+            blocks.put(new JSONObject().put("block",phase).put("round",plan.round(phase)).put("route",route).put("frames_completed",frames).put("elapsed_ns",elapsed)
+                .put("fps",frames*(1e9/elapsed)).put("device_before",before).put("device_after",device()));
         }
         JSONObject routeReport(int route)throws Exception {
-            return new JSONObject().put("route",route).put("frames_completed",stats.frames(route)).put("measured_ns",stats.nanos(route))
-                .put("sustained_fps",stats.fps(route)).put("best_block_fps",stats.bestBlockFps(route)).put("last_three_blocks_fps",stats.lastBlocksFps(route,3));
+            JSONArray rounds=new JSONArray();
+            for(int round=0;round<2;round++) {
+                long frames=0,ns=0;
+                for(int i=0;i<blocks.length();i++){JSONObject b=blocks.getJSONObject(i);if(b.getInt("route")==route&&b.getInt("round")==round){frames+=b.getLong("frames_completed");ns+=b.getLong("elapsed_ns");}}
+                rounds.put(new JSONObject().put("round",round).put("frames_completed",frames).put("measured_ns",ns).put("fps",ns==0?0:frames*(1e9/ns)));
+            }
+            return new JSONObject().put("route",route).put("name",BenchmarkPlan.name(route)).put("frames_completed",totals.frames(route)).put("measured_ns",totals.nanos(route))
+                .put("sustained_fps",totals.fps(route)).put("best_block_fps",totals.bestBlockFps(route)).put("last_three_blocks_fps",totals.lastBlocksFps(route,3)).put("rounds",rounds);
         }
         void run()throws Exception {
             long wallStart=System.nanoTime();boolean success=false;
             try {
-                report.put("format","GPU-VIRTUAL-C07-sustained-v1");report.put("source_commit",BuildInfo.SOURCE_SHA);report.put("hardware_sustained_test_passed",false);
-                report.put("device",Build.MODEL);report.put("fingerprint",Build.FINGERPRINT);report.put("android_api",Build.VERSION.SDK_INT);
-                report.put("gl_renderer",renderer);report.put("gl_vendor",vendor);report.put("gl_version",version);
-                report.put("hardware_driver_identified",hardware);report.put("software_renderer_detected",software);report.put("emulator_detected",emulated);
-                report.put("hardware_evidence_basis","Android profile, identified GL driver, GPU fences, compute values and framebuffer readback; no physical performance counters");
-                report.put("n",n);report.put("width",SIDE);report.put("height",SIDE);report.put("scene_seed",SEED);
-                report.put("device_start",deviceInfo.read());report.put("blocks",blocks);report.put("one_second_windows",windows);report.put("captures",captures);
-                report.put("measurement","Completed render frames / actual measured wall time; CPU preparation, GL submission, instrumentation and fence waits included");
-                report.put("presentation_inside_measurement",false);report.put("screen_fps_used_in_calculation",false);report.put("sleep_or_target_fps",false);
-                report.put("start_context","onDrawFrame after pending UI request; resources and EGL context ready");
-                report.put("progress_instrumentation","Independent 500 ms UI heartbeat reads Java snapshots; per-submission and per-signaled-fence counters. Timer alone does not imply GPU progress; telemetry cost included.");
-                report.put("completion","One GLsync fence per submitted frame; count increments only after that fence signals; pipeline of eight frames");
-                report.put("schedule","Twelve >=5 s blocks in ABBA/BAAB/ABBA order; six per route, >=30 s active per route, shared sustained device load");
-                report.put("phase_sequence","tick=1024+8*(route_frame_index modulo 64); same cyclic scene sequence per route, independent of screen cadence");
-                report.put("warmup_seconds_per_route",2);report.put("pipeline_frames",8);report.put("pss_kib_start",Debug.getPss());
-                report.put("scope","Offscreen throughput of this C05 scene at fixed resolution, under current device conditions; not visible FPS or a universal hardware maximum. No arbitrary shaders, RFS1 port or Ether integration.");
+                report.put("format","GPU-VIRTUAL-C08-graphics-campaign-v1").put("run_id",runId).put("source_commit",BuildInfo.SOURCE_SHA).put("hardware_sustained_test_passed",false);
+                report.put("device",Build.MODEL).put("fingerprint",Build.FINGERPRINT).put("android_api",Build.VERSION.SDK_INT);
+                report.put("gl_renderer",renderer).put("gl_vendor",vendor).put("gl_version",version);
+                report.put("hardware_driver_identified",hardware).put("software_renderer_detected",software).put("emulator_detected",emulated);
+                report.put("n",n).put("width",plan.width).put("height",plan.height).put("scene_seed",SEED).put("pipeline_frames",plan.pipeline);
+                JSONObject initial=device();report.put("device_start",initial);
+                need(initial.has("power_save_mode")&&!initial.getBoolean("power_save_mode"),"Desactiva el ahorro de energia antes de medir este perfil");
+                monitor.operation("PREPARE_TARGETS_AND_CACHE",System.nanoTime());
+                ensureTargets(plan.width,plan.height);prepareGpuSlots(n,plan.pipeline);long cacheStart=System.nanoTime();prepareHashCache(n);
+                report.put("cache_prepare_before_test_ns",System.nanoTime()-cacheStart).put("cache_setup_ns_since_context_creation",hashSetupNs);
+                report.put("blocks",blocks).put("one_second_windows",windows).put("captures",captures);
+                report.put("measurement","Confirmed frames / actual measured wall time, including CPU preparation, compute if used, API submission, telemetry and fence waits");
+                report.put("presentation_inside_measurement",false).put("screen_fps_used_in_calculation",false).put("sleep_or_target_fps",false);
+                report.put("completion","One GLsync after each frame, count only after signaled; selected pipeline depth is fixed for all four routes");
+                report.put("schedule","Two mirrored rounds of four-route Williams rows; 32 >=4 s blocks, eight per route, >=32 s per route; each quartet contains every route");
+                report.put("phase_sequence","tick=1024+8*(route_frame_index modulo 64), same cyclic states per route, independent of display cadence");
+                report.put("warmup_seconds_per_route",2).put("pss_kib_start",Debug.getPss());
+                report.put("authoritative_scene_packet_bytes",84).put("cache_validity","mixWord(id XOR seed), independent of tick and exceptions; invalidation on context or seed change (seed fixed in this profile)");
+                report.put("cache_active_prefix_bytes",4L*n).put("cache_reserved_gpu_capacity_bytes",4L*MAX_OBJECTS);
+                report.put("dense_gpu_buffers_reserved_bytes",32L*MAX_OBJECTS).put("dense_cpu_direct_buffer_capacity_bytes",16L*MAX_OBJECTS);
+                report.put("gpu_materialization_ring_reserved_bytes",16L*n*plan.pipeline).put("gpu_materialization_ring_slots",plan.pipeline);
+                report.put("gpu_materialization_ring_reuse","One distinct output buffer per frame in the batch; reuse only after all prior batch fences signal. No intra-batch read/write alias.");
+                report.put("all_comparison_buffers_retained_for_every_route",true);
+                report.put("scene_api_byte_basis","Per-frame scene arrays only; excludes mode, camera, viewport, constant attributes, API overhead and initial cache uploads");
+                JSONArray definitions=new JSONArray();
+                String[] descriptions={"CPU materializes 4 uint32 per light and uploads each frame","GPU rules directly in the vertex shader, no per-light state buffer","Same rules with a derived, persistent 1 uint32 hash cache per identity; no dense state per frame","Compute GPU generates full state into distinct ring slots, vertex barrier then instanced draw; no CPU expansion, per-light upload or intra-batch state-buffer reuse"};
+                for(int route=0;route<4;route++)definitions.put(new JSONObject().put("route",route).put("name",BenchmarkPlan.name(route)).put("description",descriptions[route])
+                    .put("scene_api_bytes_per_frame",route==0?16L*n+16:route==3?96:80).put("logical_state_bytes_written_by_compute_per_frame",route==3?16L*n:0));
+                report.put("route_definitions",definitions).put("byte_metrics_are_physical_traffic_or_total_vram",false);
+                report.put("progress_instrumentation","500 ms independent UI snapshots; submitted and signaled-fence counters; UI clock alone is not GPU progress, instrumentation included");
+                report.put("scope","Own specialized scene at selected resolution and load. Tests the compact route against both CPU and GPU materialization. No arbitrary shader runtime, world-record claim, energy measurement or automatic game integration; full state materialization remains explicit.");
                 put("vertex.glsl",vertexSource.getBytes(StandardCharsets.UTF_8));put("fragment.glsl",fragmentSource.getBytes(StandardCharsets.UTF_8));put("compute.glsl",computeSource.getBytes(StandardCharsets.UTF_8));
-                report.put("vertex_sha256",sha(vertexSource.getBytes(StandardCharsets.UTF_8)));report.put("fragment_sha256",sha(fragmentSource.getBytes(StandardCharsets.UTF_8)));report.put("compute_sha256",sha(computeSource.getBytes(StandardCharsets.UTF_8)));
-                listener.progress("Verificando imagen y datos antes de medir…");validate("before",1024);
-                warm(0);warm(1);frameIndex[0]=frameIndex[1]=0;
-                for(int phase=0;phase<order.length;phase++)measure(phase,order[phase]);
-                listener.progress("Verificando imagen y datos despues de medir…");validate("after",1376);
-                need(validatedPairs==2&&verifiedWords==n*8L&&blocks.length()==12,"Cobertura sostenida incompleta");
+                report.put("vertex_sha256",sha(vertexSource.getBytes(StandardCharsets.UTF_8))).put("fragment_sha256",sha(fragmentSource.getBytes(StandardCharsets.UTF_8))).put("compute_sha256",sha(computeSource.getBytes(StandardCharsets.UTF_8)));
+                byte[] hashBytes=readBuffer(hashVbo,n*4);IntBuffer hashes=ByteBuffer.wrap(hashBytes).order(ByteOrder.LITTLE_ENDIAN).asIntBuffer();
+                for(int id=0;id<n;id++)need(hashes.get()==SceneState.mix(id^SEED),"Cache GPU distinta a la referencia");
+                put("hash-cache.u32",hashBytes);report.put("hash_cache_words_checked",n).put("hash_cache_sha256",sha(hashBytes));
+                validate("before",1024);for(int route=0;route<4;route++)warm(route);
+                for(int phase=0;phase<BenchmarkPlan.BLOCKS;phase++)measure(phase,plan.route(phase));
+                validateTimedRing();
+                validate("after",1376);
+                need(validatedPairs==6&&verifiedWords==n*24L&&ringVerifiedWords==n*4L*plan.pipeline&&blocks.length()==BenchmarkPlan.BLOCKS,"Cobertura de campana incompleta");
+                for(int route=0;route<4;route++)need(totals.nanos(route)>=32_000_000_000L,"Tiempo de metodo incompleto");
                 continuing();success=true;report.put("status",hardware?"PASSED_ON_IDENTIFIED_HARDWARE_DRIVER":"SOFTWARE_OR_UNIDENTIFIED_DRIVER");
                 report.put("hardware_sustained_test_passed",hardware);
-            } catch(Exception error) {
-                report.put("status",error instanceof CancellationException?"CANCELLED":"NOT_VERIFIED");report.put("error",error.toString());
-            } finally {
+            }catch(Exception error) {
+                report.put("status",error instanceof CancellationException?"CANCELLED":"NOT_VERIFIED").put("error",error.toString());
+            }finally {
                 monitor.phase("SAVING",-1,-1,System.nanoTime());
-                report.put("verified_image_pairs",validatedPairs);report.put("gpu_state_words_checked",verifiedWords);
-                report.put("routes",new JSONArray().put(routeReport(0)).put(routeReport(1)));report.put("pss_kib_end",Debug.getPss());
-                report.put("device_end",deviceInfo.read());report.put("total_wall_ns_including_validation_and_warmup",System.nanoTime()-wallStart);
+                report.put("verified_image_pairs",validatedPairs).put("gpu_state_words_checked",verifiedWords).put("timed_ring_state_words_checked",ringVerifiedWords).put("pss_kib_end",Debug.getPss()).put("device_end",device());
+                report.put("power_save_off_in_all_recorded_snapshots",powerFree).put("performance_comparison_eligible",success&&powerFree&&hardware);
+                report.put("total_wall_ns_including_validation_and_warmup",System.nanoTime()-wallStart);
+                JSONArray routes=new JSONArray();for(int route=0;route<4;route++)routes.put(routeReport(route));report.put("routes",routes);
+                int bestCompact=totals.fps(2)>totals.fps(1)?2:1,fastest=0;
+                for(int route=1;route<4;route++)if(totals.fps(route)>totals.fps(fastest))fastest=route;
+                report.put("fastest_route_in_this_run",fastest).put("best_compact_route_in_this_run",bestCompact);
+                report.put("best_compact_gain_vs_cpu_percent",totals.fps(0)==0?JSONObject.NULL:(totals.fps(bestCompact)/totals.fps(0)-1)*100);
+                report.put("best_compact_gain_vs_gpu_materialization_percent",totals.fps(3)==0?JSONObject.NULL:(totals.fps(bestCompact)/totals.fps(3)-1)*100);
+                report.put("winner_selection_scope","Within this one campaign; not an independent validation of a universal best path");
                 report.put("monitor_before_save",monitorJson(probe()));JSONArray events=new JSONArray();
-                for(ProbeMonitor.Event e:monitor.events())events.put(new JSONObject().put("stage",e.stage).put("route",e.route).put("block_zero_based",e.block).put("elapsed_ns",e.elapsedNs));
-                report.put("monitor_events",events);
+                for(ProbeMonitor.Event e:monitor.events())events.put(new JSONObject().put("stage",e.stage).put("route",e.route).put("block_zero_based",e.block).put("elapsed_ns",e.elapsedNs));report.put("monitor_events",events);
                 put("report.json",report.toString(2).getBytes(StandardCharsets.UTF_8));zip.close();
-                // Vuelve a mostrar una sola imagen una vez finalizada la medicion.
-                if(success)GLES30.glFinish();else GLES30.glFlush();GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER,0);
+                GLES30.glFlush();GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER,0);
                 monitor.finish(success?"DONE":report.optString("status","ERROR"),report.optString("error",""),System.nanoTime());
-                String summary=String.format(Locale.ROOT,"%s\nReglas: %.1f FPS sostenidos\nDatos: %.1f FPS sostenidos\nMejor bloque: %.1f / %.1f FPS\n%,d luces · 512 × 512 · cuadros terminados\n%s",
-                    success&&hardware?"SOSTENIDA · PRUEBA COMPLETA":"SOSTENIDA · PARCIAL O SIN VERIFICAR",stats.fps(1),stats.fps(0),stats.bestBlockFps(1),stats.bestBlockFps(0),n,
-                    success?"FPS de calculo fuera de pantalla.":report.optString("error","Driver sin clasificar"));
-                listener.result(archive,report,summary);
+                StringBuilder summary=new StringBuilder(success&&hardware?"CAMPANA COMPLETA":"RESULTADO PARCIAL O SIN VERIFICAR");
+                for(int route=0;route<4;route++)summary.append(String.format(Locale.ROOT,"\n%s: %.2f FPS",BenchmarkPlan.name(route),totals.fps(route)));
+                summary.append("\n").append(n).append(" luces · ").append(plan.label()).append("\n32 bloques · 2 rondas · fuera de pantalla");
+                if(success&&powerFree){mode=bestCompact;summary.append("\nMejor compacta aplicada al visor: ").append(BenchmarkPlan.name(bestCompact));}
+                if(!powerFree)summary.append("\nAhorro activo o sin dato en algun control: comparar condiciones.");
+                if(!success)summary.append("\n").append(report.optString("error","Incompleto"));
+                listener.result(archive,report,summary.toString());
             }
         }
     }
@@ -384,6 +489,7 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
         final ZipOutputStream zip;
         boolean closed;
         Bench()throws Exception {
+            ensureTargets(SIDE,SIDE);
             zip=new ZipOutputStream(new FileOutputStream(archive));zip.setLevel(1);
             report.put("format","GPU-VIRTUAL-C05-graphics-v1");report.put("source_commit",BuildInfo.SOURCE_SHA);
             report.put("hardware_graphics_test_passed",false);report.put("status","RUNNING");report.put("device",Build.MODEL);
@@ -424,7 +530,7 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
                     put(prefix+"-gpu-state.u32",actual);need(Arrays.equals(actual,expected),"El estado GPU difiere de la proyeccion CPU");checkedWords+=n*4L;
                 }
             }
-            GLES30.glBindFramebuffer(GLES30.GL_READ_FRAMEBUFFER,framebuffers[mode]);GLES30.glBindFramebuffer(GLES30.GL_DRAW_FRAMEBUFFER,0);
+            GLES30.glBindFramebuffer(GLES30.GL_READ_FRAMEBUFFER,framebuffers[mode&1]);GLES30.glBindFramebuffer(GLES30.GL_DRAW_FRAMEBUFFER,0);
             GLES30.glBlitFramebuffer(0,0,SIDE,SIDE,0,0,width,height,GLES30.GL_COLOR_BUFFER_BIT,GLES30.GL_LINEAR);check();
             index++;
             if(index%8==0)listener.progress("Comparacion "+(workload+1)+" / 3 · "+n+" luces\n"+Math.max(0,index)+" / "+samples+" pares medidos");

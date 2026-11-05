@@ -33,7 +33,7 @@ def value(n,tick,seed,id):
 def generate():
     rng=random.Random(0xc051326)
     cases=[]
-    for n in [1,17,257,4096,65536]:
+    for n in [1,17,257,4096,65536,262144]:
         for tick in [0,1,255,511,123456789,0x7fffffff,0xffffffff]:
             seed=rng.getrandbits(32)
             ids=sorted(set([0,n//3,n//2,n-1]+[d[0] for d in details(n,tick)]+[rng.randrange(n) for _ in range(min(n,64))]))
@@ -46,3 +46,4 @@ def generate():
     return cases
 
 if __name__=='__main__':generate()
+

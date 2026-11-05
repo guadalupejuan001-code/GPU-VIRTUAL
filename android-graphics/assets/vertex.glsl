@@ -1,4 +1,5 @@
 layout(location=0) in uvec4 denseValue;
+layout(location=1) in uint stableHash;
 uniform int compactMode;
 uniform vec4 camera;
 uniform vec2 viewportSize;
@@ -7,7 +8,7 @@ out vec3 pointColor;
 const vec2 corners[6]=vec2[6](vec2(-1,-1),vec2(1,-1),vec2(-1,1),vec2(-1,1),vec2(1,-1),vec2(1,1));
 void main() {
     uint id=uint(gl_InstanceID);
-    uvec4 raw=compactMode==1?sceneValue(id):denseValue;
+    uvec4 raw=compactMode==1?sceneValue(id):(compactMode==2?sceneValueFromHash(id,stableHash):denseValue);
     vec3 p=(vec3(raw.xyz)-vec3(512.0))/512.0;
     float rx=camera.x*p.x+camera.y*p.z;
     float rz=-camera.y*p.x+camera.x*p.z;
@@ -24,3 +25,4 @@ void main() {
     float density=inversesqrt(max(1.0,float(parameters.x)/4096.0));
     pointColor=mix(cool,warm,tint)*density*(0.8+shimmer*0.4);
 }
+

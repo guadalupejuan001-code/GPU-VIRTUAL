@@ -12,9 +12,11 @@ public final class SustainedStats {
         Block(int route,long frames,long nanos){this.route=route;this.frames=frames;this.nanos=nanos;}
         public double fps(){return frames*(1e9/nanos);}
     }
-    private final long[] frames=new long[2],nanos=new long[2];
+    private final long[] frames,nanos;
     private final List<Block> blocks=new ArrayList<>();
-    private static void route(int route){if(route<0||route>1)throw new IllegalArgumentException("Metodo desconocido");}
+    public SustainedStats(){this(2);}
+    public SustainedStats(int routes){if(routes<1)throw new IllegalArgumentException("Sin metodos");frames=new long[routes];nanos=new long[routes];}
+    private void route(int route){if(route<0||route>=frames.length)throw new IllegalArgumentException("Metodo desconocido");}
     public void add(int route,long frames,long nanos) {
         route(route);
         if(frames<1||nanos<1)throw new IllegalArgumentException("Bloque sin cuadros terminados o tiempo");
@@ -33,3 +35,4 @@ public final class SustainedStats {
     }
     public List<Block> blocks(){return Collections.unmodifiableList(blocks);}
 }
+
