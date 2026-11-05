@@ -166,7 +166,7 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
             if(now-lastLive>=1_000_000_000L) {
                 double fps=(now>liveStart&&liveFrames>1)?(liveFrames-1)*1e9/(now-liveStart):0;
                 long bytes=mode==0?16L*objects+16:80;
-                listener.live(String.format(Locale.ROOT,"%s · %,d luces\n%s · %.1f FPS visibles · %,d B de escena/cuadro",renderer,objects,mode==1?"REGLAS + CAMBIOS":"DATOS COMPLETOS",fps,bytes));
+                listener.live(String.format(Locale.ROOT,"%s · %,d luces\n%s · %.1f FPS visor · %,d B de escena/cuadro",renderer,objects,mode==1?"REGLAS + CAMBIOS":"DATOS COMPLETOS",fps,bytes));
                 lastLive=now;liveStart=now;liveFrames=1;
             }
         }catch(Exception error){if(bench!=null)bench.fail(error);else{fatal=true;listener.progress("Error de dibujo:\n"+error);}}

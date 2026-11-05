@@ -59,7 +59,7 @@ public final class MainActivity extends Activity implements SceneRenderer.Listen
             if(sustainedActive){renderer.requestStop();sustained.setEnabled(false);summary.setText("Deteniendo y guardando el resultado parcial…");return;}
             int count=counts[selected];Display display=getWindowManager().getDefaultDisplay();
             busy(true,true);renderer.prepareSustained();surface.setRenderMode(GLSurfaceView.RENDERMODE_WHEN_DIRTY);
-            metrics.setText("Vista pausada · calculo fuera de pantalla\nLa medicion no usa los FPS visibles.");
+            metrics.setText("Vista pausada · calculo fuera de pantalla\nLa medicion no usa los FPS del visor.");
             summary.setText("Preparando la prueba sostenida…");
             surface.queueEvent(()->renderer.sustained(count,()->deviceSnapshot(display)));
         });
@@ -85,8 +85,8 @@ public final class MainActivity extends Activity implements SceneRenderer.Listen
     }
     @Override public void live(String text){runOnUiThread(()->{if(!sustainedActive)metrics.setText(text+String.format(java.util.Locale.ROOT,"\nPantalla: %.1f Hz informados por Android",getWindowManager().getDefaultDisplay().getRefreshRate()));});}
     @Override public void progress(String text){runOnUiThread(()->summary.setText(text));}
-    @Override public void result(File file,JSONObject report,String text){archive=file;runOnUiThread(()->{summary.setText(text);busy(false,false);surface.setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUS);save.setEnabled(file.isFile());});}
-    @Override public void failure(String text){runOnUiThread(()->{summary.setText(text);busy(false,false);surface.setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUS);});}
+    @Override public void result(File file,JSONObject report,String text){archive=file;runOnUiThread(()->{summary.setText(text);busy(false,false);surface.setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY);save.setEnabled(file.isFile());});}
+    @Override public void failure(String text){runOnUiThread(()->{summary.setText(text);busy(false,false);surface.setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY);});}
     @Override protected void onResume(){super.onResume();if(surface!=null)surface.onResume();}
     @Override protected void onPause(){if(surface!=null){renderer.requestStop();surface.queueEvent(()->renderer.cancel());surface.onPause();}super.onPause();}
     @Override protected void onActivityResult(int request,int result,Intent data) {
