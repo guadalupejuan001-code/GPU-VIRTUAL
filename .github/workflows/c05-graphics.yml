@@ -1,0 +1,35 @@
+name: C05 - escena grafica y comparacion Android
+
+'on':
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Obtener el codigo exacto
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Preparar el driver software de referencia
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libegl1 libgl1-mesa-dri
+      - name: Ejecutar shaders y comparar ambas imagenes sobre CPU software
+        run: python3 android-graphics/verify_host.py
+      - name: Compilar y validar el APK
+        run: bash android-graphics/build.sh
+      - name: Conservar el APK y la evidencia de construccion
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: GPU-VIRTUAL-C05-ANDROID-${{ github.sha }}
+          path: android-graphics/build/dist/
+          if-no-files-found: error
+          retention-days: 30

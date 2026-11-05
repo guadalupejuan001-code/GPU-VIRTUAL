@@ -222,3 +222,17 @@ por caso y se comprueba contra 15.358 resultados escalares. Las consultas
 individuales no expanden columnas completas; la verificacion si las expande.
 El analisis y la continuacion C04 corren en CPU. No se declara aceleracion
 frente a GPU convencional, nueva ejecucion fisica, ni integracion con C01/XI.
+
+## C05: escena grafica utilizable en Android
+
+[Campo de luz](android-graphics/README.md) convierte el principio en una escena
+animada propia, con dos rutas sobre un mismo programa grafico: materializacion
+CPU y envio de datos completos, o reglas y cambios evaluados por GPU. Permite
+cambiar la carga, observar la cadencia de la app y comparar tiempos de cuadros
+terminados a resolucion fija. Exporta imagenes, valores, paquetes y muestras.
+
+Es un perfil especializado nuevo, sin puerto automatico de RFS1 ni integracion
+con el nucleo C01 o Ether. Su correccion se verifica con referencia escalar,
+Java y shaders en driver software; sus tiempos fisicos requieren ejecutar el
+APK en el dispositivo. El ahorro de almacenamiento C04 no implica un aumento
+proporcional ni automatico de FPS.

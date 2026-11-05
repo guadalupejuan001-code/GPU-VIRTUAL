@@ -1,5 +1,6 @@
 /build/
 /android-probe/build/
+/android-graphics/build/
 /evidence/current/
 /evidence/c02/reference-*/captures.zip
 __pycache__/
