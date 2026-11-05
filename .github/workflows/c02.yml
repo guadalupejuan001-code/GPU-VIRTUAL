@@ -1,0 +1,47 @@
+name: C02 - capturas de shaders en referencia software
+
+'on':
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  observe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Obtener la revision exacta
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Preparar el driver de referencia software
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libegl1 libgl1-mesa-dri
+
+      - name: Comprobar los filtros y rechazos de archivos invalidos
+        run: python3 -m unittest discover -s experiments/c02 -p 'test_*.py' -v
+
+      - name: Ejecutar y contrastar dos dominios y tamanos de grupo
+        run: |
+          mkdir -p evidence/current
+          python3 experiments/c02/observe.py --software --count 1024 --local-size 64 > evidence/current/c02-summary.json
+          python3 experiments/c02/observe.py --software --count 257 --local-size 16 --output evidence/current/c02-257 > evidence/current/c02-257-summary.json
+
+      - name: Volver a verificar las capturas persistidas
+        run: |
+          python3 experiments/c02/observe.py --replay evidence/current/c02/captures.zip
+          python3 experiments/c02/observe.py --replay evidence/current/c02-257/captures.zip
+
+      - name: Conservar las capturas completas y los informes
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: GPU-VIRTUAL-C02-software-${{ github.sha }}
+          path: evidence/current/
+          if-no-files-found: error
+          retention-days: 30

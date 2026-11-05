@@ -1,0 +1,153 @@
+{
+  "backend": {
+    "vendor": "Mesa",
+    "renderer": "llvmpipe (LLVM 20.1.2, 256 bits)",
+    "version": "4.5 (Core Profile) Mesa 25.2.8-0ubuntu0.24.04.2",
+    "glsl": "4.50",
+    "backend_kind": "software",
+    "physical_gpu_verified": false,
+    "device_nodes": [],
+    "egl_version": "1.5",
+    "software_requested": true
+  },
+  "captured_words": 581322,
+  "checked_values": 596680,
+  "dispatches": 24,
+  "all_reference_values_equal": true,
+  "all_filtered_captures_exact": true,
+  "physical_gpu_verified": false,
+  "findings_1024": {
+    "same_histogram_different_order": {
+      "same_histogram": true,
+      "different_final_outputs": 1023,
+      "n": 1024,
+      "first_input_prefix": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "second_input_prefix": [
+        850,
+        613,
+        301,
+        485,
+        527,
+        871,
+        391,
+        681
+      ]
+    },
+    "same_present_output_different_future": {
+      "same_initial_c": 0,
+      "same_initial_output": 1515870810,
+      "distinct_future_outputs": 368,
+      "example_outputs": [
+        4294967293,
+        44,
+        43,
+        62,
+        97,
+        88,
+        151,
+        122
+      ]
+    },
+    "float32_order_changes_bits": {
+      "different_results": 768,
+      "n": 1024,
+      "example": {
+        "left_bits": 1078984704,
+        "right_bits": 0
+      }
+    },
+    "same_group_sum_different_neighbor_result": {
+      "same_group_sums": true,
+      "different_final_outputs": 1009,
+      "n": 1024
+    },
+    "output_store_changes_memory_without_changing_other_captured_variables": {
+      "same_first_seven_fields": true,
+      "output_before": 1515870810,
+      "output_after": 4294967293
+    }
+  },
+  "sizes_1024": [
+    {
+      "case": "uniform",
+      "captured_value_bytes": 196608,
+      "filtered_capture_bytes": 10932
+    },
+    {
+      "case": "ascending",
+      "captured_value_bytes": 196608,
+      "filtered_capture_bytes": 33052
+    },
+    {
+      "case": "wrapped_progression",
+      "captured_value_bytes": 196608,
+      "filtered_capture_bytes": 33052
+    },
+    {
+      "case": "checkerboard",
+      "captured_value_bytes": 196608,
+      "filtered_capture_bytes": 34388
+    },
+    {
+      "case": "sparse_changes",
+      "captured_value_bytes": 196608,
+      "filtered_capture_bytes": 23560
+    },
+    {
+      "case": "shuffled_ascending",
+      "captured_value_bytes": 196608,
+      "filtered_capture_bytes": 104952
+    },
+    {
+      "case": "seeded_words",
+      "captured_value_bytes": 196608,
+      "filtered_capture_bytes": 104840
+    },
+    {
+      "case": "repeated_tile",
+      "captured_value_bytes": 196608,
+      "filtered_capture_bytes": 33452
+    },
+    {
+      "case": "shared_full_groups",
+      "captured_value_bytes": 73728,
+      "filtered_capture_bytes": 32917
+    },
+    {
+      "case": "shared_permuted_within_groups",
+      "captured_value_bytes": 73728,
+      "filtered_capture_bytes": 32917
+    },
+    {
+      "case": "shared_partial_group",
+      "captured_value_bytes": 73224,
+      "filtered_capture_bytes": 32721
+    },
+    {
+      "case": "float_order",
+      "captured_value_bytes": 65536,
+      "filtered_capture_bytes": 548
+    }
+  ],
+  "source_sha256": {
+    "experiments/c02/filters.py": "a919cd222660fd4f70941e867d576609f3f756ba248a9be93c6fa7998de4a175",
+    "experiments/c02/gl_capture.py": "bb939e5d475e20aaecf51bc02a94f45bc718bf4c3dd463e78523a0a41049b007",
+    "experiments/c02/observe.py": "7dab7cbe2081bd74d27f6cef6252be0fd79bfba4967d04ee562f9be27f8106f5",
+    "experiments/c02/test_filters.py": "c941e1b1db9d5d47e17ae6336e5206817bd793f5000f97968db9e2576f8c8d33"
+  },
+  "capture_delivery": {
+    "filename": "GPU-VIRTUAL-C02-CAPTURAS.zip",
+    "sha256": "5fb89152d84c843fd9b2a8661e99531f3e6426794c9462a07b04fbb7c9cda12d",
+    "bytes": 763827,
+    "source_repository_included": false
+  }
+}

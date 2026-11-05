@@ -179,3 +179,15 @@ reanuda el checkpoint, ejecuta sanitizadores y adjunta su evidencia.
 
 El siguiente ciclo debe ampliar las operaciones admitidas y verificar sus
 resultados sobre el estado compacto antes de integrar Ether o la GPU fisica.
+
+## C02: observar antes de elegir otra representacion
+
+[Experimento C02](experiments/c02/README.md): shaders propios ejecutados mediante
+el driver OpenGL del sistema, capturas de sus variables y memoria seleccionada,
+referencia escalar independiente y filtros con reconstruccion exacta. Examina
+datos, elecciones de control, direcciones, memoria compartida y orden float32.
+
+La [evidencia inicial de C02](evidence/c02/README.md) conserva las capturas completas
+y los contraejemplos. El anfitrion disponible usa llvmpipe sobre CPU. Las pruebas
+en GPU fisica, el estado completo de dispositivo y la minimalidad general
+siguen pendientes. C02 no modifica el nucleo C01.

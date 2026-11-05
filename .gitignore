@@ -1,4 +1,5 @@
 /build/
 /evidence/current/
+/evidence/c02/reference-*/captures.zip
 __pycache__/
 *.pyc
