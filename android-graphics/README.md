@@ -72,7 +72,8 @@ solapamiento de luces no puede pasar solo porque el pixel final coincida.
 
 Hay ocho pares de calentamiento y 48 pares medidos por conteo, alternando
 que ruta se ejecuta primero y usando el mismo tick en cada pareja. Se guardan
-todas las muestras, mediana y percentil 95. Los conteos se recorren en orden
+todas las muestras, mediana y percentil 95 con interpolacion lineal entre
+estadisticos de orden. Los conteos se recorren en orden
 fijo; no hay estabilizacion termica ni promesa de significacion estadistica.
 Lectura, verificacion y ZIP quedan fuera de los intervalos medidos.
 

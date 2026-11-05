@@ -182,7 +182,7 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
             need(GLES30.glUnmapBuffer(SSBO),"Buffer invalido");check();return result;
         }finally{GLES30.glDeleteBuffers(1,ids,0);}
     }
-    private static double percentile(double[] values,double q){double[] copy=values.clone();Arrays.sort(copy);return copy[(int)Math.ceil(q*(copy.length-1))];}
+    private static double percentile(double[] values,double q){double[] copy=values.clone();Arrays.sort(copy);double at=q*(copy.length-1);int low=(int)Math.floor(at),high=(int)Math.ceil(at);return copy[low]+(copy[high]-copy[low])*(at-low);}
     private static JSONObject stats(double[] values)throws Exception {
         double sum=0;for(double v:values)sum+=v;
         return new JSONObject().put("median_ms",percentile(values,0.5)).put("p95_ms",percentile(values,0.95)).put("mean_ms",sum/values.length);
