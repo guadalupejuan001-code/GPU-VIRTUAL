@@ -10,13 +10,23 @@ public final class SurfaceScene {
     public final ByteBuffer bodies;
     public final float[] eye=new float[4],right=new float[3],up=new float[3],forward=new float[3];
     public SurfaceScene(int count,int preset,float yaw,float pitch){
-        if(count<0||count>4096||preset<0||preset>3)throw new IllegalArgumentException("Perfil de superficies invalido");
+        if(count<0||count>65535||preset<0||preset>4)throw new IllegalArgumentException("Perfil de superficies invalido");
         this.count=preset==3?0:count;this.preset=preset;
         bodies=ByteBuffer.allocateDirect(Math.max(4,this.count*BODY_BYTES)).order(ByteOrder.LITTLE_ENDIAN);
         int side=Math.max(1,(int)Math.ceil(Math.sqrt(Math.max(1,this.count))));
         for(int i=0;i<this.count;i++){
+            if(preset==4&&i<2){
+                // Two real triangles form the ground; no screen-space proxy.
+                put(0,-1.6f,-8,33);put(.28f,.37f,.23f,1);put(1,1,1,0);
+                if(i==0){put(-24,-1.6f,-26,2);put(24,-1.6f,-26,0);put(24,-1.6f,10,0);}
+                else{put(-24,-1.6f,-26,2);put(24,-1.6f,10,0);put(-24,-1.6f,10,0);}
+                continue;
+            }
             float x=((i%side+.5f)/side-.5f)*8.4f,y=((i/side+.5f)/side-.5f)*5.6f,z=-.15f*(i%5);
             float radius=(preset==1?5.6f:1.4f)/side;
+            // Larger loads add coverage/occlusion instead of shrinking to
+            // numerically unstable subpixel spheres. C09 profiles unchanged.
+            if(this.count>4096)radius=Math.max(radius,.021875f);
             int kind=i%3;
             if(preset==2&&i==0){x=0;y=0;z=0;radius=7.9f;kind=0;}
             put(x,y,z,radius);
@@ -27,6 +37,9 @@ public final class SurfaceScene {
             put(x,y+radius*.85f,z-radius*.2f,0);
         }
         bodies.position(0);bodies.limit(Math.max(4,this.count*BODY_BYTES));
+        camera(yaw,pitch);
+    }
+    public void camera(float yaw,float pitch){
         float cy=(float)Math.cos(yaw),sy=(float)Math.sin(yaw),cp=(float)Math.cos(pitch),sp=(float)Math.sin(pitch);
         eye[0]=sy*cp*8.5f;eye[1]=sp*8.5f;eye[2]=cy*cp*8.5f;eye[3]=(float)Math.tan(Math.toRadians(47)*.5);
         right[0]=cy;right[1]=0;right[2]=-sy;

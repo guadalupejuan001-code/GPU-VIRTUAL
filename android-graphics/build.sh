@@ -43,7 +43,7 @@ if [[ ! -f build/scene-debug.keystore ]]; then
     -keypass android -alias scene -keyalg RSA -keysize 2048 -validity 3650 \
     -dname "CN=GPU VIRTUAL Scene Test,O=GPU VIRTUAL,C=US"
 fi
-apk="build/dist/GPU-VIRTUAL-C09-SUPERFICIES-GPU.apk"
+apk="build/dist/GPU-VIRTUAL-C10-PERSISTENTE-GPU.apk"
 "$android_tools/apksigner" sign --ks build/scene-debug.keystore --ks-key-alias scene \
   --ks-pass pass:android --key-pass pass:android --out "$apk" build/aligned.apk
 "$android_tools/apksigner" verify --verbose "$apk" > build/dist/signature-validation.txt
@@ -51,7 +51,7 @@ apk="build/dist/GPU-VIRTUAL-C09-SUPERFICIES-GPU.apk"
 python3 - <<'PY'
 from pathlib import Path
 import json,hashlib,zipfile,shutil
-p=Path('build/dist/GPU-VIRTUAL-C09-SUPERFICIES-GPU.apk')
+p=Path('build/dist/GPU-VIRTUAL-C10-PERSISTENTE-GPU.apk')
 with zipfile.ZipFile(p) as z:
  assert z.testzip() is None and 'classes.dex' in z.namelist()
  for asset in Path('assets').glob('*.glsl'):assert z.read('assets/'+asset.name)==asset.read_bytes()
@@ -60,6 +60,8 @@ if Path('build/host-preview.png').exists():shutil.copyfile('build/host-preview.p
 if Path('build/shader-compiler-validation.json').exists():shutil.copyfile('build/shader-compiler-validation.json','build/dist/shader-compiler-validation.json')
 if Path('build/surface-host-validation.json').exists():shutil.copyfile('build/surface-host-validation.json','build/dist/surface-host-validation.json')
 if Path('build/surface-preview.png').exists():shutil.copyfile('build/surface-preview.png','build/dist/surface-preview.png')
+if Path('build/surface2-host-validation.json').exists():shutil.copyfile('build/surface2-host-validation.json','build/dist/surface2-host-validation.json')
+if Path('build/surface2-preview.png').exists():shutil.copyfile('build/surface2-preview.png','build/dist/surface2-preview.png')
 report={'apk':p.name,'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),
         'signature_verified':True,'hardware_gpu_executed':False,'android_device_run_required':True,
         'scene_host':json.loads(Path('build/dist/scene-host-validation.json').read_text()),
@@ -69,7 +71,8 @@ report={'apk':p.name,'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_byt
         'startup_host':json.loads(Path('build/dist/startup-host-validation.json').read_text()),
         'shader_compiler_host':json.loads(Path('build/shader-compiler-validation.json').read_text()) if Path('build/shader-compiler-validation.json').exists() else None,
         'surface_host':json.loads(Path('build/surface-host-validation.json').read_text()) if Path('build/surface-host-validation.json').exists() else None,
-        'profile':'C09 Ether Surface Buffer GPU: conservative tile masks, packed uint16 IDs and RGBA8, implicit background, reconstructed depth, one active pixel pool. C08 tools preserved. Device execution required.'}
+        'surface2_host':json.loads(Path('build/surface2-host-validation.json').read_text()) if Path('build/surface2-host-validation.json').exists() else None,
+        'profile':'C10 compact CSR candidate lists, reusable ID visibility, stable intersections, terrain, 65535 objects and camera rebuild cost. Three GPU routes; one pixel pool; C09/C08 shader evidence preserved. Device execution required.'}
 Path('build/dist/validation.json').write_text(json.dumps(report,indent=2)+'\n');print(json.dumps(report))
 PY
 

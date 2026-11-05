@@ -1,3 +1,11 @@
+# C10: superficies persistentes y listas compactas
+
+El APK actual es **GPU-VIRTUAL-C10-PERSISTENTE-GPU.apk**, paquete
+`x.gpu.surface10`. Incluye tres rutas GPU, listas compactas de candidatos,
+reutilizacion de visibilidad, terreno y pruebas de camara movil.
+Consulta [C10-PERSISTENTE.md](C10-PERSISTENTE.md) para contratos, precision,
+memoria y medicion. El historial siguiente conserva las etapas anteriores.
+
 # C09: buffer de superficies en GPU
 
 El APK actual **GPU-VIRTUAL-C09-SUPERFICIES-GPU.apk** abre el primer observador

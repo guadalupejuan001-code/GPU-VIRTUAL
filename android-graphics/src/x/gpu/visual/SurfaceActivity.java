@@ -11,14 +11,14 @@ import org.json.JSONObject;
 import java.io.*;
 import java.util.Locale;
 
-/** Device-facing C09 instrument; all image generation happens on the GL thread. */
+/** Device-facing C10 instrument; all image generation happens on the GL thread. */
 public final class SurfaceActivity extends Activity implements SurfaceRenderer.Listener {
     private GLSurfaceView surface;private SurfaceRenderer renderer;
     private TextView metrics,summary,progress;
-    private Button route,amount,preset,resolution,depth,measure,save;
+    private Button route,amount,preset,resolution,depth,measure,save,motion;
     private final Handler ui=new Handler(Looper.getMainLooper());
-    private final int[] counts={64,256,1024,4096};private int selected,scenePreset;
-    private boolean hd=true,depthMode,resumed;private float touchX,touchY;
+    private final int[] counts={64,256,1024,4096,16384,65535};private int selected=3,scenePreset=4;
+    private boolean hd=true,depthMode,resumed,cameraMoving;private float touchX,touchY;
     private File resultFile,exportFile;
     private final Runnable heartbeat=new Runnable(){public void run(){if(!resumed)return;boolean busy=renderer.busy();progress.setVisibility(busy||!renderer.ready()?View.VISIBLE:View.GONE);progress.setText(renderer.progress());controls();ui.postDelayed(this,400);}};
     private int dp(int n){return (int)(n*getResources().getDisplayMetrics().density+.5f);}
@@ -29,7 +29,7 @@ public final class SurfaceActivity extends Activity implements SurfaceRenderer.L
         super.onCreate(saved);getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setPadding(dp(14),dp(10),dp(14),dp(10));root.setBackgroundColor(Color.rgb(6,12,24));
         root.setOnApplyWindowInsetsListener((view,insets)->{view.setPadding(dp(14)+insets.getSystemWindowInsetLeft(),dp(10)+insets.getSystemWindowInsetTop(),dp(14)+insets.getSystemWindowInsetRight(),dp(10)+insets.getSystemWindowInsetBottom());return insets;});
-        root.addView(label("GPU VIRTUAL  /  C09",12,Color.rgb(113,222,211)));root.addView(label("Superficies en GPU",27,Color.WHITE));
+        root.addView(label("GPU VIRTUAL  /  C10",12,Color.rgb(113,222,211)));root.addView(label("Superficies persistentes",27,Color.WHITE));
         root.addView(label("Tu buffer de superficies. Gira la camara y compara color, profundidad y memoria.",14,Color.rgb(171,185,205)));
         surface=new GLSurfaceView(this);surface.setEGLContextClientVersion(3);surface.setEGLConfigChooser(8,8,8,8,0,0);surface.setPreserveEGLContextOnPause(true);
         renderer=new SurfaceRenderer(this,this,this::device);surface.setRenderer(renderer);
@@ -42,25 +42,26 @@ public final class SurfaceActivity extends Activity implements SurfaceRenderer.L
         LinearLayout panel=new LinearLayout(this);panel.setOrientation(LinearLayout.VERTICAL);ScrollView scroll=new ScrollView(this);scroll.addView(panel);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
         metrics=label("Abriendo el contexto grafico…",12,Color.rgb(132,225,195));panel.addView(metrics);
         progress=label("Esperando GPU",13,Color.WHITE);panel.addView(progress);
-        route=button("Buffer: compacto GPU");amount=button("64 objetos");row(panel,route,amount);
-        preset=button("Escena: dispersa");resolution=button("HD · 1280 x 720");row(panel,preset,resolution);
+        route=button("Metodo: persistente");amount=button("4.096 objetos");row(panel,route,amount);
+        preset=button("Escena: terreno");resolution=button("HD · 1280 x 720");row(panel,preset,resolution);
         depth=button("Ver profundidad");save=button("Copiar diagnostico");row(panel,depth,save);
-        measure=button("Verificar y medir · ~30 s");panel.addView(measure,new LinearLayout.LayoutParams(-1,dp(52)));
-        Button legacy=button("Abrir pruebas de luces C08");panel.addView(legacy,new LinearLayout.LayoutParams(-1,dp(48)));
-        summary=label("Esferas, elipsoides y triangulos opacos. Fondo por regla y profundidad reconstruida. La GPU crea el mapa y la imagen. La escena ocupada permite comprobar el coste cuando compactar no ahorra. Mantiene precision float32; aun no compone transparencias.",12,Color.rgb(171,185,205));summary.setTextIsSelectable(true);panel.addView(summary);
+        measure=button("Verificar y medir · ~45 s");panel.addView(measure,new LinearLayout.LayoutParams(-1,dp(52)));
+        Button legacy=button("Pruebas de luces C08");motion=button("Camara: fija");row(panel,motion,legacy);
+        summary=label("Tres metodos con la misma imagen: denso rapido, compacto y persistente. El persistente conserva la superficie mientras solo cambia la luz. La prueba con camara movil incluye reconstruir el mapa. Objetos opacos y precision float32; sin transparencias.",12,Color.rgb(171,185,205));summary.setTextIsSelectable(true);panel.addView(summary);
         setContentView(root);root.requestApplyInsets();
-        route.setOnClickListener(v->{int r=1-renderer.route();renderer.route(r);route.setText(r==1?"Buffer: compacto GPU":"Buffer: denso GPU");resultFile=null;});
+        route.setOnClickListener(v->{int r=(renderer.route()+1)%3;renderer.route(r);route.setText("Metodo: "+new String[]{"denso rapido","compacto","persistente"}[r]);resultFile=null;});
         amount.setOnClickListener(v->{selected=(selected+1)%counts.length;amount.setText(String.format(Locale.ROOT,"%,d objetos",counts[selected]));configure();});
-        preset.setOnClickListener(v->{scenePreset=(scenePreset+1)%4;preset.setText("Escena: "+new String[]{"dispersa","superpuesta","ocupada","vacia"}[scenePreset]);configure();});
+        preset.setOnClickListener(v->{scenePreset=(scenePreset+1)%5;preset.setText("Escena: "+new String[]{"dispersa","superpuesta","ocupada","vacia","terreno"}[scenePreset]);configure();});
         resolution.setOnClickListener(v->{hd=!hd;resolution.setText(hd?"HD · 1280 x 720":"640 x 360");configure();});
         depth.setOnClickListener(v->{depthMode=!depthMode;renderer.depth(depthMode);depth.setText(depthMode?"Ver color":"Ver profundidad");});
-        measure.setOnClickListener(v->{if(renderer.busy()){renderer.stop();return;}resultFile=null;renderer.requestTest();summary.setText("Verificando ambas representaciones. La medicion terminara cuadros fuera de pantalla; el visor volvera al finalizar.");});
+        motion.setOnClickListener(v->{cameraMoving=!cameraMoving;renderer.moving(cameraMoving);motion.setText(cameraMoving?"Camara: movil":"Camara: fija");resultFile=null;});
+        measure.setOnClickListener(v->{if(renderer.busy()){renderer.stop();return;}resultFile=null;renderer.requestTest();summary.setText("Verificando los tres metodos. La medicion terminara cuadros fuera de pantalla; el visor volvera al finalizar.");});
         save.setOnClickListener(v->{if(resultFile!=null&&!renderer.busy()){exportFile=resultFile;Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("application/zip");i.putExtra(Intent.EXTRA_TITLE,resultFile.getName());startActivityForResult(i,91);}else copy();});
         save.setOnLongClickListener(v->{copy();return true;});legacy.setOnClickListener(v->{if(!renderer.busy())startActivity(new Intent(this,MainActivity.class));});controls();
     }
     private void configure(){resultFile=null;renderer.configure(counts[selected],scenePreset,hd);}
-    private void controls(){boolean enabled=renderer.ready()&&!renderer.busy()&&!renderer.failed();for(Button b:new Button[]{route,amount,preset,resolution,depth})b.setEnabled(enabled);measure.setEnabled(renderer.ready()&&!renderer.failed());measure.setText(renderer.busy()?"Detener y guardar parcial":"Verificar y medir · ~30 s");save.setText(resultFile!=null&&!renderer.busy()?"Guardar prueba":"Copiar diagnostico");}
-    private void copy(){try{ClipboardManager cb=(ClipboardManager)getSystemService(CLIPBOARD_SERVICE);if(cb==null)throw new IllegalStateException("Portapapeles no disponible");cb.setPrimaryClip(ClipData.newPlainText("GPU VIRTUAL C09",renderer.diagnostic().toString(2)));Toast.makeText(this,"Diagnostico copiado",Toast.LENGTH_SHORT).show();}catch(Exception e){Toast.makeText(this,e.toString(),Toast.LENGTH_LONG).show();}}
+    private void controls(){boolean enabled=renderer.ready()&&!renderer.busy()&&!renderer.failed();for(Button b:new Button[]{route,amount,preset,resolution,depth,motion})b.setEnabled(enabled);measure.setEnabled(renderer.ready()&&!renderer.failed());measure.setText(renderer.busy()?"Detener y guardar parcial":"Verificar y medir · ~45 s");save.setText(resultFile!=null&&!renderer.busy()?"Guardar prueba":"Copiar diagnostico");}
+    private void copy(){try{ClipboardManager cb=(ClipboardManager)getSystemService(CLIPBOARD_SERVICE);if(cb==null)throw new IllegalStateException("Portapapeles no disponible");cb.setPrimaryClip(ClipData.newPlainText("GPU VIRTUAL C10",renderer.diagnostic().toString(2)));Toast.makeText(this,"Diagnostico copiado",Toast.LENGTH_SHORT).show();}catch(Exception e){Toast.makeText(this,e.toString(),Toast.LENGTH_LONG).show();}}
     private JSONObject device(){JSONObject out=new JSONObject();try{PowerManager power=(PowerManager)getSystemService(POWER_SERVICE);if(power!=null){out.put("power_save_mode",power.isPowerSaveMode());if(Build.VERSION.SDK_INT>=29)out.put("thermal_status",power.getCurrentThermalStatus());}
         Intent b=registerReceiver(null,new IntentFilter(Intent.ACTION_BATTERY_CHANGED));if(b!=null)out.put("battery_temperature_deci_c",b.getIntExtra(BatteryManager.EXTRA_TEMPERATURE,-1)).put("battery_level",b.getIntExtra(BatteryManager.EXTRA_LEVEL,-1)).put("plugged",b.getIntExtra(BatteryManager.EXTRA_PLUGGED,0));
     }catch(Exception e){try{out.put("error",e.toString());}catch(Exception ignored){}}return out;}
