@@ -1,0 +1,29 @@
+name: C03 - construir prueba para GPU fisica Android
+
+'on':
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Obtener la revision exacta
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Compilar, contrastar filtros y firmar el APK
+        run: bash android-probe/build.sh
+      - name: Conservar el APK y su validacion de compilacion
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: GPU-VIRTUAL-C03-ANDROID-${{ github.sha }}
+          path: android-probe/build/dist/
+          if-no-files-found: error
+          retention-days: 30

@@ -191,3 +191,11 @@ La [evidencia inicial de C02](evidence/c02/README.md) conserva las capturas comp
 y los contraejemplos. El anfitrion disponible usa llvmpipe sobre CPU. Las pruebas
 en GPU fisica, el estado completo de dispositivo y la minimalidad general
 siguen pendientes. C02 no modifica el nucleo C01.
+
+## C03: llevar la prueba al dispositivo fisico
+
+[Prueba Android](android-probe/README.md): APK que ejecuta los vectores de C02
+mediante compute shaders OpenGL ES en el telefono, identifica su driver,
+rechaza software/emuladores y exporta capturas e informe. El workflow C03
+construye y valida el APK; el resultado fisico requiere ejecutarlo en el
+dispositivo y revisar el archivo exportado.
