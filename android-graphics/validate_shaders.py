@@ -5,6 +5,7 @@ import hashlib
 import json
 import shutil
 import subprocess
+from surface_sources import sources as surface_sources
 
 ROOT=Path(__file__).resolve().parent
 
@@ -17,6 +18,7 @@ def run():
     startup='#version 310 es\n'+text('startup-scene.glsl')+'\n'
     shaders={'startup.vert':startup+text('startup-vertex.glsl'),'scene.vert':common+text('vertex.glsl'),
              'scene.frag':text('fragment.glsl'),'scene.comp':common+text('compute.glsl')}
+    shaders.update(surface_sources())
     rows=[]
     for name,source in shaders.items():
         path=out/name;path.write_text(source)

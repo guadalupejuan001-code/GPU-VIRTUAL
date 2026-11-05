@@ -1,4 +1,4 @@
-name: C08R2 - Compute readonly compatible Android
+name: C09 - Ether Surface Buffer GPU Android
 
 'on':
   push:
@@ -25,13 +25,15 @@ jobs:
         run: python3 android-graphics/validate_shaders.py
       - name: Ejecutar shaders y comparar ambas imagenes sobre CPU software
         run: python3 android-graphics/verify_host.py
+      - name: Verificar superficies GPU, profundidad y referencia escalar independiente
+        run: python3 android-graphics/verify_surface.py
       - name: Compilar y validar el APK
         run: bash android-graphics/build.sh
       - name: Conservar el APK y la evidencia de construccion
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: GPU-VIRTUAL-C08R2-ANDROID-${{ github.sha }}
+          name: GPU-VIRTUAL-C09-ANDROID-${{ github.sha }}
           path: android-graphics/build/dist/
           if-no-files-found: error
           retention-days: 30

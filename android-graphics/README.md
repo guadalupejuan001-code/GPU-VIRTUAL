@@ -1,3 +1,12 @@
+# C09: buffer de superficies en GPU
+
+El APK actual **GPU-VIRTUAL-C09-SUPERFICIES-GPU.apk** abre el primer observador
+de superficies GPU (`x.gpu.surfacegpu`). Consulta
+[C09-SUPERFICIES.md](C09-SUPERFICIES.md) para el formato, contratos, memoria,
+validacion y protocolo de dispositivo. Las pruebas C08 se conservan y se
+abren desde el boton del nuevo visor. La documentacion siguiente conserva
+las etapas y evidencias anteriores.
+
 # C08R2: compute compatible con calificadores readonly
 
 Instalar **GPU-VIRTUAL-C08R2-COMPUTE.apk** y abrir **C08R2 Compute**.
