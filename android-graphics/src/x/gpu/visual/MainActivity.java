@@ -4,6 +4,8 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.graphics.Color;
 import android.opengl.GLSurfaceView;
 import android.os.Bundle;
@@ -42,9 +44,9 @@ public final class MainActivity extends Activity implements SceneRenderer.Listen
     private Button mode,amount,compare,save,sustained,resolution,pipeline;
     private File archive,exportFile;
     private int selected=2;
-    private boolean sustainedActive,resumed,exportPending;
+    private boolean sustainedActive,resumed,exportPending,workBusy;
     private final Handler ui=new Handler(Looper.getMainLooper());
-    private final Runnable heartbeat=new Runnable(){@Override public void run(){if(resumed){showProbe();ui.postDelayed(this,500);}}};
+    private final Runnable heartbeat=new Runnable(){@Override public void run(){if(resumed){showStartup();showProbe();ui.postDelayed(this,500);}}};
     private final int[] counts={4096,16384,65536,262144};
     private boolean hd;
     private int batch=8;
@@ -58,7 +60,7 @@ public final class MainActivity extends Activity implements SceneRenderer.Listen
         LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setBackgroundColor(Color.rgb(7,12,24));
         root.setPadding(dp(14),dp(10),dp(14),dp(10));
         root.setOnApplyWindowInsetsListener((view,insets)->{view.setPadding(dp(14)+insets.getSystemWindowInsetLeft(),dp(10)+insets.getSystemWindowInsetTop(),dp(14)+insets.getSystemWindowInsetRight(),dp(10)+insets.getSystemWindowInsetBottom());return insets;});
-        root.addView(label("GPU VIRTUAL  /  C08",12,Color.rgb(119,217,231)));
+        root.addView(label("GPU VIRTUAL  /  C08R",12,Color.rgb(119,217,231)));
         TextView title=label("Graficos compactos",27,Color.WHITE);title.setPadding(0,dp(3),0,dp(5));root.addView(title);
         TextView info=label("Cuatro metodos, la misma escena. Dos rondas de FPS sostenidos fuera de pantalla.",14,Color.rgb(171,183,203));root.addView(info);
         surface=new GLSurfaceView(this);surface.setEGLContextClientVersion(3);surface.setEGLConfigChooser(8,8,8,8,0,0);surface.setPreserveEGLContextOnPause(true);
@@ -71,19 +73,24 @@ public final class MainActivity extends Activity implements SceneRenderer.Listen
         probePanel.addView(probeBar,new LinearLayout.LayoutParams(-1,dp(18)));
         probeText=label("Esperando el contexto grafico…",15,Color.WHITE);probeText.setGravity(Gravity.CENTER);probePanel.addView(probeText);
         viewport.addView(probePanel,new FrameLayout.LayoutParams(-1,-1));probePanel.setVisibility(View.GONE);
-        LinearLayout.LayoutParams image=new LinearLayout.LayoutParams(-1,0,1);image.topMargin=dp(10);image.bottomMargin=dp(8);root.addView(viewport,image);
-        metrics=label("Abriendo la escena…",13,Color.rgb(130,221,196));root.addView(metrics);
+        // Fixed positive viewport: large system fonts must not collapse SurfaceView to zero height.
+        int viewportHeight=Math.min(dp(260),Math.max(dp(160),getResources().getDisplayMetrics().heightPixels/3));
+        LinearLayout.LayoutParams image=new LinearLayout.LayoutParams(-1,viewportHeight);image.topMargin=dp(10);image.bottomMargin=dp(8);root.addView(viewport,image);
+        LinearLayout panel=new LinearLayout(this);panel.setOrientation(LinearLayout.VERTICAL);
+        ScrollView controlsScroll=new ScrollView(this);controlsScroll.addView(panel,new FrameLayout.LayoutParams(-1,-2));root.addView(controlsScroll,new LinearLayout.LayoutParams(-1,0,1));
+        metrics=label("Esperando superficie grafica…",13,Color.rgb(130,221,196));panel.addView(metrics);
         LinearLayout controls=new LinearLayout(this);
-        mode=new Button(this);mode.setText(BenchmarkPlan.name(2));controls.addView(mode,new LinearLayout.LayoutParams(0,dp(48),1));
-        amount=new Button(this);amount.setText("65.536 luces");controls.addView(amount,new LinearLayout.LayoutParams(0,dp(48),1));root.addView(controls);
+        mode=new Button(this);mode.setText(BenchmarkPlan.name(1));controls.addView(mode,new LinearLayout.LayoutParams(0,dp(48),1));
+        amount=new Button(this);amount.setText("65.536 luces");controls.addView(amount,new LinearLayout.LayoutParams(0,dp(48),1));panel.addView(controls);
         LinearLayout profiles=new LinearLayout(this);
         resolution=new Button(this);resolution.setText("512 x 512");profiles.addView(resolution,new LinearLayout.LayoutParams(0,dp(48),1));
-        pipeline=new Button(this);pipeline.setText("Lote: 8 cuadros");profiles.addView(pipeline,new LinearLayout.LayoutParams(0,dp(48),1));root.addView(profiles);
-        sustained=new Button(this);sustained.setText("Medir 4 metodos · ~2,5 min");root.addView(sustained,new LinearLayout.LayoutParams(-1,dp(48)));
+        pipeline=new Button(this);pipeline.setText("Lote: 8 cuadros");profiles.addView(pipeline,new LinearLayout.LayoutParams(0,dp(48),1));panel.addView(profiles);
+        sustained=new Button(this);sustained.setText("Medir 4 metodos · ~2,5 min");panel.addView(sustained,new LinearLayout.LayoutParams(-1,dp(48)));
         LinearLayout actions=new LinearLayout(this);compare=new Button(this);compare.setText("Latencia (2 rutas)");actions.addView(compare,new LinearLayout.LayoutParams(0,dp(48),1));
-        save=new Button(this);save.setText("Guardar prueba");save.setEnabled(false);actions.addView(save,new LinearLayout.LayoutParams(0,dp(48),1));root.addView(actions);
-        ScrollView scroll=new ScrollView(this);summary=label("Repite primero con 65.536 luces, 512 x 512 y lote 8 para comparar con C06. Desactiva el ahorro de energia. Luego prueba HD o lote 16 cambiando una opcion cada vez. Cada metodo recibe al menos 32 s medidos; al terminar se aplica la mejor ruta compacta de ese ensayo al visor.",12,Color.rgb(171,183,203));scroll.addView(summary);root.addView(scroll,new LinearLayout.LayoutParams(-1,dp(100)));
+        save=new Button(this);save.setText("Copiar diagnostico");actions.addView(save,new LinearLayout.LayoutParams(0,dp(48),1));panel.addView(actions);
+        summary=label("Primero se abre el visor con los shaders C06. Los cuatro metodos se preparan al pedirlos. Si una etapa tarda, Copiar diagnostico funciona sin esperar al hilo grafico. Para medir, desactiva ahorro y deja 65.536 luces, 512 x 512, lote 8.",12,Color.rgb(171,183,203));summary.setTextIsSelectable(true);panel.addView(summary);
         setContentView(root);root.requestApplyInsets();
+        updateControls();
         mode.setOnClickListener(v->{int next=(renderer.mode()+1)%BenchmarkPlan.ROUTES;surface.queueEvent(()->renderer.mode(next));mode.setText(BenchmarkPlan.name(next));});
         resolution.setOnClickListener(v->{hd=!hd;resolution.setText(hd?"HD · 1280 x 720":"512 x 512");});
         pipeline.setOnClickListener(v->{batch=batch==8?16:8;pipeline.setText("Lote: "+batch+" cuadros");});
@@ -101,27 +108,39 @@ public final class MainActivity extends Activity implements SceneRenderer.Listen
             metrics.setText("Medicion sostenida · sin presentar cada cuadro\nEl cronometro de UI no confirma progreso GPU.");
             summary.setText("Arrancando desde un cuadro con contexto grafico listo. La animacion volvera al terminar.");
         });
-        save.setOnClickListener(v->{
-            try {
-                if(sustainedActive){
-                    JSONObject snapshot=renderer.diagnostic().put("device_snapshot",deviceSnapshot(getWindowManager().getDefaultDisplay()));
-                    snapshot.put("requested_width",plan().width).put("requested_height",plan().height).put("requested_pipeline",batch);
-                    exportFile=new File(getCacheDir(),"GPU-VIRTUAL-C08-DIAGNOSTICO.json");
-                    try(FileOutputStream out=new FileOutputStream(exportFile)){out.write(snapshot.toString(2).getBytes(StandardCharsets.UTF_8));}
-                    renderer.requestStop();sustained.setEnabled(false);save.setEnabled(false);
-                    summary.setText("Diagnostico preparado. Deteniendo antes de abrir el selector; esperando al controlador.");
-                }else exportFile=archive;
-                exportPending=exportFile!=null;tryExport();
-            }catch(Exception error){Toast.makeText(this,"No se pudo preparar el archivo: "+error,Toast.LENGTH_LONG).show();}
-        });
+        save.setOnClickListener(v->{StartupState.Snapshot s=renderer.startup();if(workBusy||!s.ready||s.loadingAdvanced||archive==null){copyDiagnostic();return;}exportFile=archive;exportPending=true;tryExport();});
+        save.setOnLongClickListener(v->{copyDiagnostic();return true;});
     }
     private void busy(boolean busy,boolean longTest) {
-        sustainedActive=busy&&longTest;mode.setEnabled(!busy);amount.setEnabled(!busy);compare.setEnabled(!busy);
-        resolution.setEnabled(!busy);pipeline.setEnabled(!busy);
-        sustained.setEnabled(!busy||longTest);sustained.setText(sustainedActive?"Detener prueba":"Medir 4 metodos · ~2,5 min");
+        workBusy=busy;sustainedActive=busy&&longTest;
+        sustained.setText(sustainedActive?"Detener prueba":"Medir 4 metodos · ~2,5 min");
         probePanel.setVisibility(sustainedActive?View.VISIBLE:View.GONE);
-        save.setText(sustainedActive?"Guardar diagnostico":"Guardar prueba");
-        save.setEnabled(sustainedActive||(!busy&&archive!=null&&archive.isFile()));
+        updateControls();
+    }
+    private void updateControls(){
+        StartupState.Snapshot s=renderer.startup();boolean idle=s.ready&&!s.fatal&&!s.loadingAdvanced&&!workBusy;
+        mode.setEnabled(idle&&!s.advancedFailed);amount.setEnabled(idle);resolution.setEnabled(idle&&!s.advancedFailed);pipeline.setEnabled(idle&&!s.advancedFailed);
+        compare.setEnabled(idle&&!s.advancedFailed);sustained.setEnabled(sustainedActive?!renderer.probe().stopRequested:idle&&!s.advancedFailed);
+        mode.setText(BenchmarkPlan.name(renderer.mode()));save.setEnabled(true);
+        save.setText(!workBusy&&s.ready&&!s.loadingAdvanced&&archive!=null?"Guardar prueba":"Copiar diagnostico");
+    }
+    private void showStartup(){
+        StartupState.Snapshot s=renderer.startup();updateControls();
+        if(s.fatal){metrics.setText(s.label+"\n"+s.error);return;}
+        if(!s.ready||s.loadingAdvanced){
+            metrics.setText(String.format(Locale.ROOT,"%s\n%s · %.1f s en esta etapa%s",s.label,s.stage,s.phaseNs/1e9,s.waiting?"\nSigue esperando: copia el diagnostico.":""));
+        }
+    }
+    private void copyDiagnostic(){
+        try {
+            JSONObject snapshot=renderer.diagnostic().put("surface_view_width",surface.getWidth()).put("surface_view_height",surface.getHeight())
+                .put("surface_view_attached",surface.isAttachedToWindow()).put("window_has_focus",surface.hasWindowFocus())
+                .put("requested_width",plan().width).put("requested_height",plan().height).put("requested_pipeline",batch).put("selected_objects",counts[selected]);
+            String text=snapshot.toString(2);File file=new File(getCacheDir(),"GPU-VIRTUAL-C08R-DIAGNOSTICO.json");
+            try(FileOutputStream out=new FileOutputStream(file)){out.write(text.getBytes(StandardCharsets.UTF_8));}
+            ClipboardManager clipboard=(ClipboardManager)getSystemService(CLIPBOARD_SERVICE);if(clipboard==null)throw new IllegalStateException("Portapapeles no disponible");
+            clipboard.setPrimaryClip(ClipData.newPlainText("GPU VIRTUAL C08R",text));Toast.makeText(this,"Diagnostico copiado. Pegalo en el chat.",Toast.LENGTH_LONG).show();
+        }catch(Exception error){Toast.makeText(this,"No se pudo copiar: "+error,Toast.LENGTH_LONG).show();}
     }
     private String phase(ProbeMonitor.Snapshot s){
         switch(s.stage){
@@ -181,7 +200,7 @@ public final class MainActivity extends Activity implements SceneRenderer.Listen
     @Override public void live(String text){runOnUiThread(()->{if(!sustainedActive)metrics.setText(text+String.format(java.util.Locale.ROOT,"\n%.1f Hz informados · ahorro %s",getWindowManager().getDefaultDisplay().getRefreshRate(),powerSave()?"ACTIVO":"desactivado"));});}
     @Override public void progress(String text){runOnUiThread(()->{if(!exportPending)summary.setText(text);});}
     @Override public void result(File file,JSONObject report,String text){runOnUiThread(()->{archive=file;summary.setText(text);mode.setText(BenchmarkPlan.name(renderer.mode()));busy(false,false);surface.setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY);tryExport();});}
-    @Override public void failure(String text){runOnUiThread(()->{summary.setText(text);busy(false,false);surface.setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY);tryExport();});}
+    @Override public void failure(String text){runOnUiThread(()->{metrics.setText(text);summary.setText(text);busy(false,false);surface.setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY);tryExport();});}
     @Override protected void onResume(){super.onResume();resumed=true;if(surface!=null)surface.onResume();ui.removeCallbacks(heartbeat);ui.post(heartbeat);tryExport();}
     @Override protected void onPause(){resumed=false;ui.removeCallbacks(heartbeat);if(surface!=null){renderer.requestStop();surface.queueEvent(()->renderer.cancel());surface.onPause();}super.onPause();}
     @Override protected void onActivityResult(int request,int result,Intent data) {

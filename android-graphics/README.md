@@ -1,8 +1,49 @@
-# C08: graficos compactos contra materializacion CPU y GPU
+# C08R: arranque compatible y campana de graficos compactos
 
-Instalar **GPU-VIRTUAL-C08-GRAFICOS-COMPACTOS.apk** y abrir **Graficos C08**.
-El paquete es `x.gpu.campaign`, separado de C05/C06/C07. No requiere red,
+Instalar **GPU-VIRTUAL-C08R-ARRANQUE.apk** y abrir **C08R Arranque**.
+El paquete es `x.gpu.recovery`, separado tambien de C08. No requiere red,
 motores externos ni permisos generales de almacenamiento.
+
+## Reparacion de arranque C08R
+
+El usuario informo que C08 quedaba en «Abriendo la escena», sin imagen.
+No hay aun un log del telefono que identifique la llamada exacta. La revision
+encontro que el primer cuadro dependia de inicializar todos los programas,
+buffers y cache nuevos; un error solo se mostraba en el resumen y dejaba
+intacto el mensaje superior. Ademas, el viewport usaba solo el espacio libre
+del layout: controles o tipografias grandes podian dejarlo sin altura.
+
+C08R arranca con los shaders propios de C06, conservados byte a byte desde
+el commit bbf5ccfc6872794f902f4bd2ff783c760503ff0e probado en Mali-G68.
+Solo prepara el programa del visor y su VAO: no compila compute ni reserva
+buffers de estado por luz, cache o framebuffers de comparacion antes de ver
+la escena. El sistema sigue proporcionando su superficie y memoria de imagen.
+El viewport tiene altura positiva independiente de los controles; estos son
+desplazables para conservar acceso a botones y errores con fuentes grandes.
+
+Los controles de prueba se habilitan despues de que el fence del primer
+cuadro haya senalado finalizacion. Las cuatro rutas se inicializan al pedir
+una prueba o un metodo que las necesite. Se conserva la campana C08 completa.
+Un fallo retornado de estas funciones guarda el log y vuelve al visor C06,
+sin sustituir silenciosamente metodos de una comparacion por rutas distintas.
+
+El hilo UI muestra etapa y tiempo durante el arranque, incluso antes de
+iniciar una medicion. Registra lectura de assets, compilacion de vertex y
+fragment, enlace, parametros, primer dibujo y confirmacion. Los errores se
+muestran tambien en el texto principal. Si una llamada nativa no devuelve
+control, se conserva visible su ultima etapa; no se declara por eso una causa
+de bloqueo del silicio ni se intenta terminar esa llamada desde otro hilo.
+
+**Copiar diagnostico** esta disponible desde el principio y lee snapshots
+Java sin llamadas GL. Copia el JSON para pegarlo en el chat, incluyendo
+etapas, error, dimensiones reales de SurfaceView y seleccion de carga.
+No abre otra actividad ni espera al hilo grafico. Durante un ensayo no lo
+cancela: **Detener** sigue separado. Tras un resultado, mantener pulsado
+**Guardar prueba** tambien copia el diagnostico; pulsarlo guarda el ZIP.
+
+Esta reparacion requiere confirmarse en el telefono. Las pruebas anfitrionas
+comprueban que el primer render funciona sin las funciones nuevas y conserva
+la imagen, pero no reproducen por si solas el bloqueo reportado en Mali.
 
 ## Repetir y buscar trabajo evitable
 
@@ -94,8 +135,8 @@ cache inicial y ZIP quedan fuera de los bloques medidos y se informan.
 El panel de UI lee snapshots cada 500 ms, con tiempo, etapa, operacion y
 cuadros enviados/confirmados. El reloj solo muestra tiempo: no inventa avance
 GPU ni FPS. Una espera prolongada queda visible. **Detener** guarda lo parcial;
-**Guardar diagnostico** prepara un JSON, solicita detener y abre el selector
-cuando el controlador devuelve el control. No termina llamadas nativas colgadas.
+**Copiar diagnostico** copia el snapshot sin cancelar ni abrir el selector.
+No termina llamadas nativas colgadas.
 
 Antes y despues se compara la imagen de las otras tres rutas con Datos CPU:
 **seis pares completos**. Tambien se contrastan todos los valores de compute
@@ -119,7 +160,7 @@ esa seleccion no predice sus FPS visibles, los de otros perfiles o juegos.
 El boton **Latencia (2 rutas)** conserva la referencia corta CPU/reglas a
 512 x 512; se etiqueta en ms para distinguirla de la campana.
 
-## Verificaciones y compilacion de C08
+## Verificaciones y compilacion de C08R
 
 - Referencia escalar Python frente a Java: 42 estados, 8.184 palabras,
   dominios hasta 262.144, semillas, overflow y excepciones.
@@ -127,11 +168,15 @@ El boton **Latencia (2 rutas)** conserva la referencia corta CPU/reglas a
 - `MonitorTest`: 11 controles de tiempo, confirmaciones, espera y reinicio.
 - `PlanTest`: 183 controles de cuatro metodos, dos rondas reflejadas,
   posiciones compensadas, cargas de 512/HD y lotes 8/16.
+- `StartupTest`: 13 controles de confirmacion inicial, espera independiente,
+  funciones nuevas diferidas, fallo sin perder el visor y recreacion de contexto.
 - `verify_host.py`: ejecuta los GLSL de produccion en llvmpipe CPU y
   verifica **12.032.024 palabras de estado**, **827.906 hashes**, doce escenas
-  con cuatro rutas equivalentes y dos imagenes finales de lotes (**38 pares
-  de imagenes**) y 96 fences. Incluye HD y 262.144 luces; prueba dos lotes
-  consecutivos con anillos de 8 y 16 buffers, sin swap.
+  con cuatro rutas equivalentes, dos imagenes finales de lotes y la imagen
+  del arranque C06 (**39 pares de imagenes**) y 97 fences. Incluye HD y
+  262.144 luces; prueba dos lotes consecutivos con anillos de 8 y 16 buffers.
+  Antes de compilar las funciones C08, dibuja y confirma el primer cuadro C06
+  sin crear buffers por luz ni programas compute. No hace swap de ventana.
 
 Estos controles no son una medicion fisica ni demuestran aceleracion en Mali.
 El APK debe ejecutarse en el Samsung para obtener esa evidencia.

@@ -296,3 +296,18 @@ medir si la cache ayuda y como se compara con materializar el estado en GPU.
 No se declara un maximo universal, una mejora de RAM total o una integracion
 automatica con otros proyectos. El coste de cache y expansion queda explicito.
 
+## C08R: reparar el arranque antes de cargar funciones nuevas
+
+La revision [C08R](android-graphics/README.md) responde al reporte de C08
+detenido en «Abriendo la escena». Inicia con los shaders propios C06 ya
+probados en Mali, prepara las cuatro rutas al pedirlas y da altura fija al
+viewport con controles desplazables. La UI muestra etapa, error y tiempo;
+el diagnostico se puede copiar sin esperar al hilo GL. No se atribuye aun
+el bloqueo del telefono a una llamada concreta: falta recibir su log.
+
+El primer cuadro se confirma antes de habilitar las pruebas. Trece controles
+anfitriones verifican ese estado y el regreso al visor si falla una funcion
+nueva. El control software conserva los 12.032.024 valores, contrasta 39
+pares de imagenes e incluye 97 fences, ahora con un primer render C06 sin
+crear buffers de estado ni compute. El APK C08R requiere confirmacion fisica.
+

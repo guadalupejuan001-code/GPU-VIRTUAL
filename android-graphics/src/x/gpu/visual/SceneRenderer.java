@@ -6,6 +6,7 @@ import android.opengl.GLES31;
 import android.opengl.GLSurfaceView;
 import android.os.Build;
 import android.os.Debug;
+import android.util.Log;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import javax.microedition.khronos.egl.EGLConfig;
@@ -37,12 +38,17 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
     private final AssetManager assets;
     private final File cache;
     private final Listener listener;
-    private volatile int mode=2,objects=65536;
+    private volatile int mode=1,objects=65536;
     private volatile boolean benchmarkRequested;
     private volatile boolean stopRequested;
     private boolean sustainedRunning;
     private volatile PendingSustained sustainedRequest;
     private final ProbeMonitor monitor=new ProbeMonitor();
+    private final StartupState startup=new StartupState(System.nanoTime());
+    private int legacyProgram,advancedProgram;
+    private int[] legacyBindings,advancedBindings;
+    private boolean advancedReady;
+    private long startupFence;
     private static final class PendingSustained {
         final int count;final DeviceInfo info;final BenchmarkPlan plan;
         PendingSustained(int count,DeviceInfo info,BenchmarkPlan plan){this.count=count;this.info=info;this.plan=plan;}
@@ -69,6 +75,8 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
     public void objects(int value){if(value<1||value>MAX_OBJECTS)throw new IllegalArgumentException("Fuera de la carga de este instrumento");objects=value;liveStart=0;liveFrames=0;}
     public void compare(){benchmarkRequested=true;}
     public ProbeMonitor.Snapshot probe(){return monitor.snapshot(System.nanoTime());}
+    public StartupState.Snapshot startup(){return startup.snapshot(System.nanoTime());}
+    private void startupStage(String stage,String label){startup.stage(stage,label,System.nanoTime());Log.i("GPU-VIRTUAL",stage+": "+label);}
     /** No hace llamadas GL desde la UI: el siguiente onDrawFrame inicia el ensayo. */
     public void requestSustained(int count,DeviceInfo info,BenchmarkPlan plan){
         need(count>=1&&count<=MAX_OBJECTS,"Carga fuera de la demo");
@@ -101,10 +109,29 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
         if(ok[0]==0){String log=GLES30.glGetProgramInfoLog(id);GLES30.glDeleteProgram(id);throw new IllegalStateException(log);}
         return id;
     }
+    private int compileGraphics(String vertex,String fragment,String prefix)throws Exception {
+        int v=0,f=0;
+        try {
+            startupStage(prefix+"_VERTEX","Compilando vertex shader "+prefix);v=shader(GLES30.GL_VERTEX_SHADER,vertex);
+            startupStage(prefix+"_FRAGMENT","Compilando fragment shader "+prefix);f=shader(GLES30.GL_FRAGMENT_SHADER,fragment);
+            startupStage(prefix+"_LINK","Enlazando programa "+prefix);int vv=v,ff=f;v=f=0;return link(vv,ff);
+        }finally{if(v!=0)GLES30.glDeleteShader(v);if(f!=0)GLES30.glDeleteShader(f);}
+    }
+    private int[] bindings(int id) {
+        int[] result={GLES30.glGetUniformLocation(id,"parameters"),GLES30.glGetUniformLocation(id,"details[0]"),
+            GLES30.glGetUniformLocation(id,"compactMode"),GLES30.glGetUniformLocation(id,"camera"),GLES30.glGetUniformLocation(id,"viewportSize")};
+        for(int at:result)need(at>=0,"Faltan parametros del programa "+id);return result;
+    }
+    private void selectGraphics(int id,int[] at){program=id;paramsAt=at[0];detailsAt=at[1];modeAt=at[2];cameraAt=at[3];viewportAt=at[4];}
     @Override public void onSurfaceCreated(GL10 unused,EGLConfig config) {
         try {
             if(bench!=null)bench.fail(new IllegalStateException("Se recreo el contexto grafico"));
-            fatal=false;renderer=GLES30.glGetString(GLES30.GL_RENDERER);vendor=GLES30.glGetString(GLES30.GL_VENDOR);version=GLES30.glGetString(GLES30.GL_VERSION);
+            startup.reset(System.nanoTime());fatal=false;advancedReady=false;startupFence=0;mode=1;
+            program=compute=legacyProgram=advancedProgram=vbo=gpuVbo=hashVbo=vao=hashCount=0;
+            legacyBindings=advancedBindings=null;denseBytes=null;denseInts=null;hashSetupNs=0;
+            Arrays.fill(gpuSlots,0);Arrays.fill(framebuffers,0);Arrays.fill(textures,0);
+            startupStage("DRIVER","Identificando GPU y version OpenGL ES");
+            renderer=GLES30.glGetString(GLES30.GL_RENDERER);vendor=GLES30.glGetString(GLES30.GL_VENDOR);version=GLES30.glGetString(GLES30.GL_VERSION);
             int[] major=new int[1],minor=new int[1];GLES30.glGetIntegerv(0x821B,major,0);GLES30.glGetIntegerv(0x821C,minor,0);
             need(major[0]>3||(major[0]==3&&minor[0]>=1),"Esta prueba requiere OpenGL ES 3.1");
             String identity=(renderer+" "+vendor).toLowerCase(Locale.ROOT);
@@ -113,29 +140,49 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
             emulated=has(device,"ranchu","goldfish","emulator","sdk_gphone","google_sdk","vbox86");
             hardware=!software&&!emulated&&has(identity,"mali","adreno","powervr","nvidia","tegra","xclipse","vivante","qualcomm","arm");
             need(ByteOrder.nativeOrder()==ByteOrder.LITTLE_ENDIAN,"El perfil requiere orden de bytes little-endian");
+            startupStage("LEGACY_ASSETS","Leyendo los shaders C06 verificados en el telefono");
+            String legacyVertex="#version 310 es\n"+asset("startup-scene.glsl")+"\n"+asset("startup-vertex.glsl");
+            String fragment=asset("fragment.glsl");
+            legacyProgram=compileGraphics(legacyVertex,fragment,"C06");
+            startupStage("LEGACY_BINDINGS","Preparando parametros del visor compatible");legacyBindings=bindings(legacyProgram);selectGraphics(legacyProgram,legacyBindings);
+            startupStage("LEGACY_VAO","Preparando geometria del visor");
+            int[] ids=new int[1];GLES30.glGenVertexArrays(1,ids,0);vao=ids[0];GLES30.glBindVertexArray(vao);check();
+            animationStart=System.nanoTime();liveStart=0;liveFrames=0;lastLive=0;
+            startupStage("WAIT_DRAW","Esperando primer cuadro compatible");
+        }catch(Throwable error){fatal=true;sustainedRequest=null;startup.fail(error.toString(),true,System.nanoTime());monitor.finish("ERROR",error.toString(),System.nanoTime());Log.e("GPU-VIRTUAL","Startup failed",error);listener.failure("No se pudo abrir la escena:\n"+error);}
+    }
+    private void releaseAdvanced() {
+        if(advancedProgram!=0)GLES30.glDeleteProgram(advancedProgram);if(compute!=0)GLES30.glDeleteProgram(compute);
+        int[] buffers={vbo,gpuVbo,hashVbo};GLES30.glDeleteBuffers(buffers.length,buffers,0);GLES30.glDeleteBuffers(gpuSlots.length,gpuSlots,0);
+        GLES30.glDeleteFramebuffers(2,framebuffers,0);GLES30.glDeleteTextures(2,textures,0);
+        advancedProgram=compute=vbo=gpuVbo=hashVbo=hashCount=0;advancedReady=false;denseBytes=null;denseInts=null;
+        Arrays.fill(gpuSlots,0);Arrays.fill(framebuffers,0);Arrays.fill(textures,0);
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER,0);GLES30.glBindVertexArray(vao);
+        for(int i=0;i<16&&GLES30.glGetError()!=0;i++){}
+        if(legacyProgram!=0&&legacyBindings!=null)selectGraphics(legacyProgram,legacyBindings);
+    }
+    private void ensureAdvanced()throws Exception {
+        if(advancedReady)return;startup.beginAdvanced(System.nanoTime());
+        try {
+            startupStage("ADVANCED_ASSETS","Leyendo los shaders de los cuatro metodos");
             String common=asset("scene.glsl");
-            vertexSource="#version 310 es\n"+common+"\n"+asset("vertex.glsl");fragmentSource=asset("fragment.glsl");
-            computeSource="#version 310 es\n"+common+"\n"+asset("compute.glsl");
-            program=link(shader(GLES30.GL_VERTEX_SHADER,vertexSource),shader(GLES30.GL_FRAGMENT_SHADER,fragmentSource));
-            compute=link(shader(GLES31.GL_COMPUTE_SHADER,computeSource));
+            vertexSource="#version 310 es\n"+common+"\n"+asset("vertex.glsl");fragmentSource=asset("fragment.glsl");computeSource="#version 310 es\n"+common+"\n"+asset("compute.glsl");
+            advancedProgram=compileGraphics(vertexSource,fragmentSource,"C08");
+            startupStage("ADVANCED_COMPUTE","Compilando compute para datos GPU y cache");compute=link(shader(GLES31.GL_COMPUTE_SHADER,computeSource));
+            startupStage("ADVANCED_BINDINGS","Preparando parametros de los cuatro metodos");
             computeParamsAt=GLES30.glGetUniformLocation(compute,"parameters");computeDetailsAt=GLES30.glGetUniformLocation(compute,"details[0]");computeCachedAt=GLES30.glGetUniformLocation(compute,"cachedMode");
-            need(computeParamsAt>=0&&computeDetailsAt>=0&&computeCachedAt>=0,"Faltan parametros compute");
-            paramsAt=GLES30.glGetUniformLocation(program,"parameters");detailsAt=GLES30.glGetUniformLocation(program,"details[0]");
-            modeAt=GLES30.glGetUniformLocation(program,"compactMode");cameraAt=GLES30.glGetUniformLocation(program,"camera");viewportAt=GLES30.glGetUniformLocation(program,"viewportSize");
-            need(paramsAt>=0&&detailsAt>=0&&modeAt>=0&&cameraAt>=0&&viewportAt>=0,"Faltan parametros de la escena");
-            int[] ids=new int[1];GLES30.glGenVertexArrays(1,ids,0);vao=ids[0];GLES30.glBindVertexArray(vao);
-            GLES30.glGenBuffers(1,ids,0);vbo=ids[0];GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER,vbo);
-            GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER,MAX_OBJECTS*16,null,GLES30.GL_STREAM_DRAW);
+            need(computeParamsAt>=0&&computeDetailsAt>=0&&computeCachedAt>=0,"Faltan parametros compute");advancedBindings=bindings(advancedProgram);
+            startupStage("ADVANCED_BUFFERS","Reservando buffers de comparacion");
+            int[] ids=new int[1];GLES30.glGenBuffers(1,ids,0);vbo=ids[0];GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER,vbo);GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER,MAX_OBJECTS*16,null,GLES30.GL_STREAM_DRAW);
             denseBytes=ByteBuffer.allocateDirect(MAX_OBJECTS*16).order(ByteOrder.LITTLE_ENDIAN);denseInts=denseBytes.asIntBuffer();
             GLES30.glGenBuffers(1,ids,0);gpuVbo=ids[0];GLES30.glBindBuffer(SSBO,gpuVbo);GLES30.glBufferData(SSBO,MAX_OBJECTS*16,null,GLES30.GL_DYNAMIC_DRAW);
             GLES30.glGenBuffers(gpuSlots.length,gpuSlots,0);
             GLES30.glGenBuffers(1,ids,0);hashVbo=ids[0];GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER,hashVbo);GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER,MAX_OBJECTS*4,null,GLES30.GL_STATIC_DRAW);
-            hashCount=0;hashSetupNs=0;prepareHashCache(objects);
-            GLES30.glGenFramebuffers(2,framebuffers,0);GLES30.glGenTextures(2,textures,0);
-            ensureTargets(SIDE,SIDE);
-            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER,0);check();
-            animationStart=System.nanoTime();liveStart=0;liveFrames=0;lastLive=0;
-        } catch(Exception error){fatal=true;sustainedRequest=null;monitor.finish("ERROR",error.toString(),System.nanoTime());listener.failure("No se pudo abrir la escena:\n"+error);}
+            startupStage("ADVANCED_CACHE","Preparando cache estable");prepareHashCache(objects);
+            startupStage("ADVANCED_TARGETS","Preparando imagenes fuera de pantalla");
+            GLES30.glGenFramebuffers(2,framebuffers,0);GLES30.glGenTextures(2,textures,0);ensureTargets(SIDE,SIDE);
+            selectGraphics(advancedProgram,advancedBindings);advancedReady=true;startup.advancedReady(System.nanoTime());check();
+        }catch(Throwable error){releaseAdvanced();mode=1;startup.fail(error.toString(),false,System.nanoTime());Log.e("GPU-VIRTUAL","Advanced initialization failed",error);throw new IllegalStateException("Fallo en funciones nuevas; se conserva el visor C06: "+error,error);}
     }
     private void ensureTargets(int w,int h) {
             targetWidth=w;targetHeight=h;
@@ -213,20 +260,34 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
             return;
         }
         try {
+            if(startupFence!=0){
+                int status=GLES30.glClientWaitSync(startupFence,0,0);
+                if(status==GLES30.GL_ALREADY_SIGNALED||status==GLES30.GL_CONDITION_SATISFIED){GLES30.glDeleteSync(startupFence);startupFence=0;startup.confirmed(System.nanoTime());}
+                else need(status==GLES30.GL_TIMEOUT_EXPIRED,"Fallo al confirmar el primer cuadro");
+            }
+            boolean ready=startup().ready;
             PendingSustained pending=sustainedRequest;
-            if(pending!=null){sustainedRequest=null;sustained(pending.count,pending.info,pending.plan);return;}
-            if(benchmarkRequested&&bench==null){benchmarkRequested=false;bench=new Bench();}
+            if(ready&&pending!=null){sustainedRequest=null;sustained(pending.count,pending.info,pending.plan);return;}
+            if(ready&&benchmarkRequested&&bench==null){benchmarkRequested=false;bench=new Bench();}
             if(bench!=null){bench.step();return;}
+            if(ready&&mode!=1)ensureAdvanced();
             long now=System.nanoTime();int tick=(int)(((now-animationStart)*60)/1_000_000_000L);
+            if(!startup().submitted)startupStage("FIRST_DRAW","Dibujando el primer cuadro C06");
             draw(mode,objects,tick,0,width,height,false);
+            if(!startup().submitted){startupFence=GLES30.glFenceSync(GLES30.GL_SYNC_GPU_COMMANDS_COMPLETE,0);need(startupFence!=0,"No se pudo crear la confirmacion inicial");GLES30.glFlush();startup.submitted(System.nanoTime());}
             if(liveStart==0){liveStart=now;liveFrames=0;}liveFrames++;
-            if(now-lastLive>=1_000_000_000L) {
+            if(startup().ready&&now-lastLive>=1_000_000_000L) {
                 double fps=(now>liveStart&&liveFrames>1)?(liveFrames-1)*1e9/(now-liveStart):0;
                 long bytes=mode==0?16L*objects+16:mode==3?96:80;
                 listener.live(String.format(Locale.ROOT,"%s · %,d luces\n%s · %.1f FPS visor · %,d B enviados/cuadro%s",renderer,objects,BenchmarkPlan.name(mode),fps,bytes,mode==2?" · cache "+(objects*4L)+" B":""));
                 lastLive=now;liveStart=now;liveFrames=1;
             }
-        }catch(Exception error){if(bench!=null)bench.fail(error);else{fatal=true;listener.failure("Error de dibujo:\n"+error);}}
+        }catch(Throwable error){
+            if(bench!=null)bench.fail(new IllegalStateException(error));
+            else if(legacyProgram!=0&&startup().ready){releaseAdvanced();mode=1;startup.fail(error.toString(),false,System.nanoTime());listener.failure("Visor compatible C06 activo. No se pudo abrir la ruta nueva:\n"+error);}
+            else{fatal=true;startup.fail(error.toString(),true,System.nanoTime());listener.failure("Error de dibujo:\n"+error);}
+            Log.e("GPU-VIRTUAL","Draw failed",error);
+        }
     }
     private byte[] pixels(int framebuffer) {
         ByteBuffer out=ByteBuffer.allocateDirect(targetWidth*targetHeight*4);GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER,framebuffer);
@@ -272,9 +333,17 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
             .put("latest_window_fps",s.windowFps<0?JSONObject.NULL:s.windowFps).put("message",s.message);
     }
     public JSONObject diagnostic()throws Exception {
-        return new JSONObject().put("format","GPU-VIRTUAL-C08-diagnostic-v1").put("source_commit",BuildInfo.SOURCE_SHA)
+        return new JSONObject().put("format","GPU-VIRTUAL-C08R-diagnostic-v1").put("source_commit",BuildInfo.SOURCE_SHA)
             .put("completed_benchmark_result",false).put("hardware_sustained_test_passed",false).put("device",Build.MODEL)
-            .put("monitor",monitorJson(probe())).put("scope","UI snapshot only; elapsed timer is not evidence of GPU progress. Frames increment only after signaled GLsync.");
+            .put("monitor",monitorJson(probe())).put("startup",startupJson()).put("gl_renderer",renderer).put("gl_vendor",vendor).put("gl_version",version)
+            .put("scope","UI snapshot only; elapsed timer is not evidence of GPU progress. Frames increment only after signaled GLsync.");
+    }
+    private JSONObject startupJson()throws Exception {
+        StartupState.Snapshot s=startup();JSONArray events=new JSONArray();
+        for(StartupState.Event e:startup.events())events.put(new JSONObject().put("stage",e.stage).put("label",e.label).put("elapsed_ns",e.elapsedNs));
+        return new JSONObject().put("stage",s.stage).put("label",s.label).put("error",s.error).put("preview_ready",s.ready).put("first_frame_submitted",s.submitted)
+            .put("loading_advanced",s.loadingAdvanced).put("advanced_ready",s.advancedReady).put("advanced_failed",s.advancedFailed).put("fatal",s.fatal)
+            .put("elapsed_ns",s.elapsedNs).put("stage_elapsed_ns",s.phaseNs).put("waiting",s.waiting).put("events",events);
     }
     private void continuing(){if(stopRequested)throw new CancellationException("Prueba interrumpida");}
     private int finishBatch(int route,int n,long firstFrame,int batchSize) {
@@ -321,7 +390,7 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
         Sustained(int n,DeviceInfo deviceInfo,BenchmarkPlan plan)throws Exception {
             this.n=n;this.deviceInfo=deviceInfo;this.plan=plan;
             need(n>=1&&n<=MAX_OBJECTS,"Carga fuera del instrumento");
-            archive=new File(cache,"GPU-VIRTUAL-C08-"+n+"-"+plan.width+"x"+plan.height+"-B"+plan.pipeline+"-"+runId+".zip");
+            archive=new File(cache,"GPU-VIRTUAL-C08R-"+n+"-"+plan.width+"x"+plan.height+"-B"+plan.pipeline+"-"+runId+".zip");
             zip=new ZipOutputStream(new FileOutputStream(archive));zip.setLevel(1);
         }
         void put(String name,byte[] value)throws Exception{zip.putNextEntry(new ZipEntry(name));zip.write(value);zip.closeEntry();}
@@ -411,6 +480,7 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
                 report.put("n",n).put("width",plan.width).put("height",plan.height).put("scene_seed",SEED).put("pipeline_frames",plan.pipeline);
                 JSONObject initial=device();report.put("device_start",initial);
                 need(initial.has("power_save_mode")&&!initial.getBoolean("power_save_mode"),"Desactiva el ahorro de energia antes de medir este perfil");
+                continuing();ensureAdvanced();continuing();report.put("build_variant","C08R");
                 monitor.operation("PREPARE_TARGETS_AND_CACHE",System.nanoTime());
                 ensureTargets(plan.width,plan.height);prepareGpuSlots(n,plan.pipeline);long cacheStart=System.nanoTime();prepareHashCache(n);
                 report.put("cache_prepare_before_test_ns",System.nanoTime()-cacheStart).put("cache_setup_ns_since_context_creation",hashSetupNs);
@@ -463,6 +533,7 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
                 report.put("best_compact_gain_vs_gpu_materialization_percent",totals.fps(3)==0?JSONObject.NULL:(totals.fps(bestCompact)/totals.fps(3)-1)*100);
                 report.put("winner_selection_scope","Within this one campaign; not an independent validation of a universal best path");
                 report.put("monitor_before_save",monitorJson(probe()));JSONArray events=new JSONArray();
+                report.put("startup",startupJson());
                 for(ProbeMonitor.Event e:monitor.events())events.put(new JSONObject().put("stage",e.stage).put("route",e.route).put("block_zero_based",e.block).put("elapsed_ns",e.elapsedNs));report.put("monitor_events",events);
                 put("report.json",report.toString(2).getBytes(StandardCharsets.UTF_8));zip.close();
                 GLES30.glFlush();GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER,0);
@@ -489,6 +560,7 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
         final ZipOutputStream zip;
         boolean closed;
         Bench()throws Exception {
+            ensureAdvanced();
             ensureTargets(SIDE,SIDE);
             zip=new ZipOutputStream(new FileOutputStream(archive));zip.setLevel(1);
             report.put("format","GPU-VIRTUAL-C05-graphics-v1");report.put("source_commit",BuildInfo.SOURCE_SHA);

@@ -14,6 +14,7 @@ ROOT=Path(__file__).resolve().parent
 sys.path.insert(0,str(ROOT.parent/'experiments/c02'))
 from gl_capture import Capture
 from make_fixtures import details,value,mix
+from verify_startup import verify_startup
 U,I,P,F,SIZE=C.c_uint,C.c_int,C.c_void_p,C.c_float,C.c_ssize_t
 sha=lambda data:hashlib.sha256(data).hexdigest()
 
@@ -35,6 +36,7 @@ def run():
         if not ok.value:
             log=C.create_string_buffer(8192);f('glGetProgramInfoLog',None,[U,I,P,P])(p,len(log),None,log);raise RuntimeError(log.value.decode())
         return p
+    startup_image,startup_report=verify_startup(gl,compile,link)
     common=(ROOT/'assets/scene.glsl').read_text()
     vertex='#version 310 es\n'+common+'\n'+(ROOT/'assets/vertex.glsl').read_text()
     fragment=(ROOT/'assets/fragment.glsl').read_text()
@@ -120,6 +122,7 @@ def run():
             if route==3:assert read_state(len(dense))==dense;checked+=len(flat)
             gl.check_error()
         assert all(image==images[0] for image in images[1:]),(n,tick,w,h,'framebuffer')
+        if (n,tick,w,h)==(65536,1024,512,512):assert images[0]==startup_image;startup_report['matches_four_route_scene']=True
         cases.append({'n':n,'tick':tick,'width':w,'height':h,'routes':4,'pixel_exact':True,'sha256':sha(images[0])})
         if n==65536 and w==1280:preview=(images[0],w,h)
     # Two batches reuse distinct state buffers only after every prior batch fence signals.
@@ -156,9 +159,10 @@ def run():
         scan=b''.join(b'\0'+pixels[y*w*4:(y+1)*w*4] for y in range(h-1,-1,-1))
         png=b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',w,h,8,6,0,0,0))+chunk(b'IDAT',zlib.compress(scan))+chunk(b'IEND',b'')
         (out/'host-preview.png').write_bytes(png)
-    report={'backend':gl.identity,'hardware_gpu_executed':False,'independent_scene_words':checked,'hash_cache_words':hash_checked,
-            'image_cases':len(cases),'equivalent_route_pairs':len(cases)*3+pipeline_image_checks,'pipeline_final_image_checks':pipeline_image_checks,'compared_pixels':sum(c['width']*c['height']*3 for c in cases)+pipeline_image_checks*w*h,'cases':cases,
-            'completed_frame_fences':frame_fences,'pipelined_frames_confirmed':48,'pipeline_depths':[8,16],'gpu_ring_batches_per_depth':2,'window_swaps':0,
+    assert startup_report['matches_four_route_scene']
+    report={'backend':gl.identity,'hardware_gpu_executed':False,'independent_scene_words':checked,'hash_cache_words':hash_checked,'startup':startup_report,
+            'image_cases':len(cases),'equivalent_route_pairs':len(cases)*3+pipeline_image_checks+1,'pipeline_final_image_checks':pipeline_image_checks,'compared_pixels':sum(c['width']*c['height']*3 for c in cases)+pipeline_image_checks*w*h+512*512,'cases':cases,
+            'completed_frame_fences':frame_fences+1,'pipelined_frames_confirmed':48,'pipeline_depths':[8,16],'gpu_ring_batches_per_depth':2,'window_swaps':0,
             'scope':'Production C08 GLSL on CPU software driver; independent Python state and hash reference; four render routes at square/HD resolutions. No physical GPU performance result.'}
     (out/'graphics-host-validation.json').write_text(json.dumps(report,indent=2)+'\n');print(json.dumps(report));gl.close()
 

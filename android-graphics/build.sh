@@ -8,11 +8,12 @@ android_tools="$sdk_root/build-tools/35.0.0"
 test -f "$android_jar"
 mkdir -p build/gen/x/gpu/visual build/classes build/dex build/host build/dist
 python3 make_fixtures.py
-java com.sun.tools.javac.Main -d build/host src/x/gpu/visual/SceneState.java src/x/gpu/visual/SustainedStats.java src/x/gpu/visual/ProbeMonitor.java src/x/gpu/visual/BenchmarkPlan.java host/SceneTest.java host/SustainedTest.java host/MonitorTest.java host/PlanTest.java
+java com.sun.tools.javac.Main -d build/host src/x/gpu/visual/SceneState.java src/x/gpu/visual/SustainedStats.java src/x/gpu/visual/ProbeMonitor.java src/x/gpu/visual/BenchmarkPlan.java src/x/gpu/visual/StartupState.java host/SceneTest.java host/SustainedTest.java host/MonitorTest.java host/PlanTest.java host/StartupTest.java
 java -cp build/host SceneTest build/scene-fixtures.dat | tee build/dist/scene-host-validation.json
 java -cp build/host SustainedTest | tee build/dist/sustained-host-validation.json
 java -cp build/host MonitorTest | tee build/dist/monitor-host-validation.json
 java -cp build/host PlanTest | tee build/dist/plan-host-validation.json
+java -cp build/host StartupTest | tee build/dist/startup-host-validation.json
 source_sha="${GITHUB_SHA:-local-uncommitted}"
 python3 - "$source_sha" <<'PY'
 from pathlib import Path
@@ -42,7 +43,7 @@ if [[ ! -f build/scene-debug.keystore ]]; then
     -keypass android -alias scene -keyalg RSA -keysize 2048 -validity 3650 \
     -dname "CN=GPU VIRTUAL Scene Test,O=GPU VIRTUAL,C=US"
 fi
-apk="build/dist/GPU-VIRTUAL-C08-GRAFICOS-COMPACTOS.apk"
+apk="build/dist/GPU-VIRTUAL-C08R-ARRANQUE.apk"
 "$android_tools/apksigner" sign --ks build/scene-debug.keystore --ks-key-alias scene \
   --ks-pass pass:android --key-pass pass:android --out "$apk" build/aligned.apk
 "$android_tools/apksigner" verify --verbose "$apk" > build/dist/signature-validation.txt
@@ -50,10 +51,10 @@ apk="build/dist/GPU-VIRTUAL-C08-GRAFICOS-COMPACTOS.apk"
 python3 - <<'PY'
 from pathlib import Path
 import json,hashlib,zipfile,shutil
-p=Path('build/dist/GPU-VIRTUAL-C08-GRAFICOS-COMPACTOS.apk')
+p=Path('build/dist/GPU-VIRTUAL-C08R-ARRANQUE.apk')
 with zipfile.ZipFile(p) as z:
  assert z.testzip() is None and 'classes.dex' in z.namelist()
- for name in ['scene.glsl','vertex.glsl','fragment.glsl','compute.glsl']:assert z.read('assets/'+name)==Path('assets',name).read_bytes()
+ for name in ['scene.glsl','vertex.glsl','fragment.glsl','compute.glsl','startup-scene.glsl','startup-vertex.glsl']:assert z.read('assets/'+name)==Path('assets',name).read_bytes()
 if Path('build/graphics-host-validation.json').exists():shutil.copyfile('build/graphics-host-validation.json','build/dist/graphics-host-validation.json')
 if Path('build/host-preview.png').exists():shutil.copyfile('build/host-preview.png','build/dist/host-preview.png')
 report={'apk':p.name,'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),
@@ -62,7 +63,8 @@ report={'apk':p.name,'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_byt
         'sustained_host':json.loads(Path('build/dist/sustained-host-validation.json').read_text()),
         'monitor_host':json.loads(Path('build/dist/monitor-host-validation.json').read_text()),
         'plan_host':json.loads(Path('build/dist/plan-host-validation.json').read_text()),
-        'profile':'C08 four-route graphics campaign, stable hash cache, GPU materialization baseline, two mirrored rounds, selected resolution and pipeline; physical device execution required'}
+        'startup_host':json.loads(Path('build/dist/startup-host-validation.json').read_text()),
+        'profile':'C08R deferred advanced initialization, byte-exact C06 startup shaders, confirmed first frame, native viewport with scrollable controls; C08 campaign preserved; physical device execution required'}
 Path('build/dist/validation.json').write_text(json.dumps(report,indent=2)+'\n');print(json.dumps(report))
 PY
 
