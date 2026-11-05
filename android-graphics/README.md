@@ -1,4 +1,80 @@
-# C05: Campo de luz, una demostracion grafica utilizable
+# C06: FPS sostenidos fuera de pantalla
+
+Instalar **GPU-VIRTUAL-C06-FPS-SOSTENIDOS.apk**, elegir la cantidad de luces y
+pulsar **Medir FPS · 60 segundos**. La vista queda fija mientras la GPU sigue
+dibujando en framebuffers de 512 por 512. No se presenta cada cuadro ni se
+espera al refresco entre cuadros dentro del bucle de medicion. Al terminar,
+**Guardar prueba** exporta `GPU-VIRTUAL-C06-RESULTADO.zip`.
+
+La app C06 usa el paquete `x.gpu.sustained` y puede coexistir con la C05.
+Conserva su escena y comparacion de latencia como referencia. La prueba nueva
+usa el mismo perfil de reglas y las mismas excepciones; no integra un motor
+ajeno, RFS1, el nucleo C01 ni Ether.
+
+## Medicion sostenida
+
+- Cuatro segundos nominales de calentamiento: dos por metodo.
+- Doce bloques de al menos cinco segundos, en orden ABBA/BAAB/ABBA.
+  Cada metodo recibe al menos treinta segundos de tiempo medido.
+- Cada cuadro enviado tiene un `GLsync`. Solo se cuenta al confirmar que
+  ese fence ha terminado. Hay hasta ocho cuadros en el lote de trabajo.
+- La tasa sostenida es **cuadros confirmados / suma de tiempos reales de sus
+  bloques**. No se usa `1000 / tiempo de un cuadro`, ni se promedian tasas
+  de intervalos desiguales, ni se usa la frecuencia de la pantalla.
+- Se guardan todos los bloques, ventanas de aproximadamente un segundo,
+  mejor bloque de cinco segundos y tasa de los ultimos tres bloques por metodo.
+- La duracion total incluye ademas calentamiento, verificacion y guardado.
+  Se puede detener desde la app; salir tambien cancela y guarda lo parcial.
+
+El bucle completo se ejecuta dentro de una sola tarea del hilo GL, fuera del
+callback repetido de cuadros visibles. Entre sus cuadros no llama a
+`eglSwapBuffers`, ni solicita otro cuadro de pantalla, ni duerme a un FPS
+objetivo. La UI puede actualizar el progreso; ese coste de instrumentacion y
+los controles del driver/sistema siguen formando parte del entorno medido.
+
+Antes y despues de medir se verifican ambos framebuffers y todos los valores
+de la escena GPU contra la proyeccion CPU. El ZIP conserva esos datos,
+paquetes XSC1, shaders exactos, bloques y ventanas de tiempo. La lectura y el
+guardado de capturas estan fuera de los intervalos medidos.
+
+Los cuadros usan la misma secuencia ciclica de 64 estados por metodo. La
+animacion del ensayo avanza por cuadro calculado, no por un reloj de pantalla
+a 60 pasos. El numero de cuadros de cada metodo puede diferir porque el tiempo
+de exposicion, la carga y la resolucion son los controles compartidos.
+
+Los FPS de este ensayo representan **rendimiento fuera de pantalla del perfil
+elegido bajo las condiciones actuales del equipo**. No son FPS visibles,
+un maximo universal del chip o un resultado transferible a todos los juegos.
+El mejor bloque tampoco sustituye la tasa sostenida de toda la prueba.
+Se informa por separado de la tasa del visor y los Hz que comunica Android.
+Tambien se registran ahorro de energia y estado termico cuando la API los ofrece.
+No se fuerzan modos de pantalla, frecuencias de reloj ni politicas termicas.
+
+La comparacion sigue siendo expansion CPU por cuadro frente a evaluacion
+procedimental GPU. La carga es compartida, con bloques intercalados; no son
+treinta segundos consecutivos aislados por metodo ni una estabilizacion
+termica garantizada. Preparacion CPU, llamadas GL y espera de fences entran
+en el tiempo real. El buffer denso se conserva en ambos metodos para comparar.
+
+## Verificacion de C06
+
+`SustainedTest` contrasta tasas ponderadas, bloques desiguales, ausencia de un
+tope de 60, estados vacios y rechazos sin alterar los acumulados. Son 18
+comprobaciones anfitrionas. `verify_host.py` verifica ademas 24 fences GL
+reales sobre llvmpipe CPU, incluidos ocho dibujos en un lote sin presentacion.
+Se mantienen las 690.184 palabras y ocho parejas de imagenes del perfil C05.
+Estas verificaciones y la construccion Android no se declaran ejecucion fisica.
+
+El control del driver usa `glFenceSync`, `glClientWaitSync` y `glDeleteSync` de
+OpenGL ES. Cada cuadro confirmado sigue teniendo el trabajo de rasterizacion
+de la escena. No se cuentan solo llamadas de envio ni cuadros descartados por
+el propio programa. El driver conserva sus optimizaciones y costes internos.
+
+La compilacion sigue usando `bash android-graphics/build.sh` y conserva sus
+validaciones en `android-graphics/build/dist/`. El APK nuevo lleva firma de
+prueba y requiere ejecutarse en el telefono para producir FPS fisicos.
+
+## Antecedente C05: Campo de luz
 
 APK nativo con una escena animada propia y dos proyecciones del mismo estado:
 
@@ -19,7 +95,7 @@ arbitrarios**, y no modifica el nucleo C01 ni integra una sesion Ether/XI.
 
 ## Uso en el telefono
 
-1. Instalar `GPU-VIRTUAL-C05-CAMPO-DE-LUZ.apk` y abrir **Campo de luz**.
+1. En la version C05, instalar `GPU-VIRTUAL-C05-CAMPO-DE-LUZ.apk` y abrir **Campo de luz**.
 2. Cambiar entre ruta compacta/completa y 4.096, 16.384 o 65.536 luces.
 3. Pulsar **Comparar ahora** y mantener la app abierta durante la prueba.
 4. Pulsar **Guardar prueba** y compartir `GPU-VIRTUAL-C05-RESULTADO.zip`.

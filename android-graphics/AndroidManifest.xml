@@ -1,8 +1,8 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="x.gpu.visual" android:versionCode="1" android:versionName="0.1-C05">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="x.gpu.sustained" android:versionCode="1" android:versionName="0.2-C06">
   <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35" />
   <uses-feature android:glEsVersion="0x00030001" android:required="true" />
-  <application android:label="GPU VIRTUAL · Campo de luz" android:theme="@android:style/Theme.Material.NoActionBar" android:allowBackup="false" android:supportsRtl="true">
-    <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
+  <application android:label="GPU VIRTUAL · FPS sostenidos" android:theme="@android:style/Theme.Material.NoActionBar" android:allowBackup="false" android:supportsRtl="true">
+    <activity android:name="x.gpu.visual.MainActivity" android:exported="true" android:screenOrientation="portrait">
       <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
     </activity>
   </application>

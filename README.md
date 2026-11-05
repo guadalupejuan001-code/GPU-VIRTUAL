@@ -236,3 +236,17 @@ con el nucleo C01 o Ether. Su correccion se verifica con referencia escalar,
 Java y shaders en driver software; sus tiempos fisicos requieren ejecutar el
 APK en el dispositivo. El ahorro de almacenamiento C04 no implica un aumento
 proporcional ni automatico de FPS.
+
+## C06: cuadros terminados por segundo, sin presentar cada uno
+
+La [prueba sostenida Android](android-graphics/README.md) ejecuta un bucle de
+render fuera de pantalla durante doce bloques de al menos cinco segundos,
+seis por metodo. Un fence GPU confirma cada cuadro antes de contarlo.
+Los FPS se calculan como cuadros terminados entre tiempo real acumulado,
+sin derivarlos del contador del visor ni de la duracion de una sola muestra.
+
+El APK distingue FPS visibles, Hz informados por Android, tasa sostenida de
+calculo y mejor bloque. Conserva capturas de correccion antes y despues,
+todos los bloques y ventanas de tiempo, con cancelacion y resultado parcial.
+La compilacion y el control llvmpipe son pruebas CPU; los FPS del telefono
+siguen requiriendo que se ejecute el nuevo APK fisicamente.

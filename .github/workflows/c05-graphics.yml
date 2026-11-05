@@ -1,4 +1,4 @@
-name: C05 - escena grafica y comparacion Android
+name: C06 - FPS sostenidos fuera de pantalla Android
 
 'on':
   push:
@@ -29,7 +29,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: GPU-VIRTUAL-C05-ANDROID-${{ github.sha }}
+          name: GPU-VIRTUAL-C06-ANDROID-${{ github.sha }}
           path: android-graphics/build/dist/
           if-no-files-found: error
           retention-days: 30

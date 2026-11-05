@@ -4,6 +4,7 @@ import ctypes as C
 import hashlib
 import json
 import math
+import time
 from pathlib import Path
 import struct
 import sys
@@ -56,7 +57,16 @@ def run():
     f('glGenFramebuffers',None,[I,C.POINTER(U)])(1,ids);target=ids[0];f('glBindFramebuffer',None,[U,U])(0x8D40,target)
     f('glFramebufferTexture2D',None,[U,U,U,U,I])(0x8D40,0x8CE0,0x0DE1,texture,0)
     assert f('glCheckFramebufferStatus',U,[U])(0x8D40)==0x8CD5
-    cases=[];checked=0;preview=None
+    cases=[];checked=0;preview=None;frame_fences=0
+    def completed(sync):
+        nonlocal frame_fences
+        need_end=time.monotonic()+30
+        while True:
+            status=f('glClientWaitSync',U,[P,U,C.c_uint64])(sync,0,1_000_000)
+            if status in (0x911A,0x911C):
+                frame_fences+=1
+                return
+            assert status==0x911B and time.monotonic()<need_end,'Fence no confirmada'
     for n in [257,4096,16384,65536]:
         for tick in [0,511]:
             seed=0xc0511a;flat=[word for i in range(n) for word in value(n,tick,seed,i)]
@@ -84,12 +94,23 @@ def run():
                     f('glEnableVertexAttribArray',None,[U])(0);f('glVertexAttribIPointer',None,[U,I,U,I,P])(0,4,0x1405,16,None);f('glVertexAttribDivisor',None,[U,U])(0,1)
                 else:
                     f('glDisableVertexAttribArray',None,[U])(0);f('glVertexAttribI4ui',None,[U,U,U,U,U])(0,0,0,0,0)
-                f('glDrawArraysInstanced',None,[U,I,I,I])(4,0,6,n);f('glFinish',None,[])()
+                f('glDrawArraysInstanced',None,[U,I,I,I])(4,0,6,n)
+                sync=f('glFenceSync',P,[U,U])(0x9117,0);assert sync
+                f('glFlush',None,[])();completed(sync);f('glDeleteSync',None,[P])(sync)
                 pixels=C.create_string_buffer(side*side*4);f('glReadPixels',None,[I,I,I,I,U,U,P])(0,0,side,side,0x1908,0x1401,pixels)
                 images.append(pixels.raw);gl.check_error()
             assert images[0]==images[1],(n,tick,'framebuffer')
             cases.append({'n':n,'tick':tick,'pixel_exact':True,'sha256':sha(images[0])})
             if n==16384 and tick==511:preview=images[0]
+    # Un lote real sin presentacion: cada dibujo tiene su propia confirmacion.
+    pending=[]
+    for step in range(8):
+        parameters(render,n,1024+step*8,seed)
+        f('glClear',None,[U])(0x4000);f('glDrawArraysInstanced',None,[U,I,I,I])(4,0,6,n)
+        sync=f('glFenceSync',P,[U,U])(0x9117,0);assert sync;pending.append(sync)
+    f('glFlush',None,[])()
+    for sync in pending:completed(sync);f('glDeleteSync',None,[P])(sync)
+    gl.check_error();assert frame_fences==24
     out=ROOT/'build';out.mkdir(exist_ok=True)
     if preview:
         def chunk(tag,payload):return struct.pack('>I',len(payload))+tag+payload+struct.pack('>I',zlib.crc32(tag+payload)&0xffffffff)
@@ -98,6 +119,7 @@ def run():
         (out/'host-preview.png').write_bytes(png)
     report={'backend':gl.identity,'hardware_gpu_executed':False,'independent_scene_words':checked,
             'image_pairs':len(cases),'compared_pixels':side*side*len(cases),'cases':cases,
+            'completed_frame_fences':frame_fences,'pipelined_frames_confirmed':8,'window_swaps':0,
             'scope':'Software driver execution of production GLSL, independent Python values, both render routes; no Android runtime execution'}
     (out/'graphics-host-validation.json').write_text(json.dumps(report,indent=2)+'\n');print(json.dumps(report));gl.close()
 
