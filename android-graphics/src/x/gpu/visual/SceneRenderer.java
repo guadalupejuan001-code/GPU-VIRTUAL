@@ -41,6 +41,12 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
     private volatile boolean benchmarkRequested;
     private volatile boolean stopRequested;
     private boolean sustainedRunning;
+    private volatile PendingSustained sustainedRequest;
+    private final ProbeMonitor monitor=new ProbeMonitor();
+    private static final class PendingSustained {
+        final int count;final DeviceInfo info;
+        PendingSustained(int count,DeviceInfo info){this.count=count;this.info=info;}
+    }
     private int width=1,height=1,program,compute,vbo,vao;
     private int paramsAt,detailsAt,modeAt,cameraAt,viewportAt;
     private final int[] framebuffers=new int[2],textures=new int[2];
@@ -59,8 +65,13 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
     public void mode(int value){mode=value==0?0:1;liveStart=0;liveFrames=0;}
     public void objects(int value){if(value<1||value>MAX_OBJECTS)throw new IllegalArgumentException("Fuera del perfil C05");objects=value;liveStart=0;liveFrames=0;}
     public void compare(){benchmarkRequested=true;}
-    public void prepareSustained(){stopRequested=false;}
-    public void requestStop(){stopRequested=true;}
+    public ProbeMonitor.Snapshot probe(){return monitor.snapshot(System.nanoTime());}
+    /** No hace llamadas GL desde la UI: el siguiente onDrawFrame inicia el ensayo. */
+    public void requestSustained(int count,DeviceInfo info){
+        need(count>=1&&count<=MAX_OBJECTS,"Carga fuera de la demo");
+        stopRequested=false;monitor.queue(count,System.nanoTime());sustainedRequest=new PendingSustained(count,info);
+    }
+    public void requestStop(){stopRequested=true;monitor.requestStop();}
     public void cancel(){if(bench!=null)bench.fail(new IllegalStateException("Comparacion interrumpida al salir de la escena"));benchmarkRequested=false;}
     private static void need(boolean ok,String message){if(!ok)throw new IllegalStateException(message);}
     private String asset(String path)throws Exception {
@@ -123,7 +134,7 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
             }
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER,0);check();
             animationStart=System.nanoTime();liveStart=0;liveFrames=0;lastLive=0;
-        } catch(Exception error){fatal=true;listener.progress("No se pudo abrir la escena:\n"+error);}
+        } catch(Exception error){fatal=true;sustainedRequest=null;monitor.finish("ERROR",error.toString(),System.nanoTime());listener.failure("No se pudo abrir la escena:\n"+error);}
     }
     @Override public void onSurfaceChanged(GL10 unused,int w,int h){width=Math.max(1,w);height=Math.max(1,h);}
     private static final class Sample {
@@ -156,8 +167,13 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
         long done=System.nanoTime();check();return new Sample(begin,prepared,done,scene);
     }
     @Override public void onDrawFrame(GL10 unused) {
-        if(fatal)return;
+        if(fatal){
+            if(sustainedRequest!=null||benchmarkRequested){sustainedRequest=null;benchmarkRequested=false;monitor.finish("ERROR","La escena no tiene contexto listo",System.nanoTime());listener.failure("La escena no tiene contexto listo para medir.");}
+            return;
+        }
         try {
+            PendingSustained pending=sustainedRequest;
+            if(pending!=null){sustainedRequest=null;sustained(pending.count,pending.info);return;}
             if(benchmarkRequested&&bench==null){benchmarkRequested=false;bench=new Bench();}
             if(bench!=null){bench.step();return;}
             long now=System.nanoTime();int tick=(int)(((now-animationStart)*60)/1_000_000_000L);
@@ -169,7 +185,7 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
                 listener.live(String.format(Locale.ROOT,"%s · %,d luces\n%s · %.1f FPS visor · %,d B de escena/cuadro",renderer,objects,mode==1?"REGLAS + CAMBIOS":"DATOS COMPLETOS",fps,bytes));
                 lastLive=now;liveStart=now;liveFrames=1;
             }
-        }catch(Exception error){if(bench!=null)bench.fail(error);else{fatal=true;listener.progress("Error de dibujo:\n"+error);}}
+        }catch(Exception error){if(bench!=null)bench.fail(error);else{fatal=true;listener.failure("Error de dibujo:\n"+error);}}
     }
     private byte[] pixels(int framebuffer) {
         ByteBuffer out=ByteBuffer.allocateDirect(SIDE*SIDE*4);GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER,framebuffer);
@@ -194,15 +210,28 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
         return new JSONObject().put("median_ms",percentile(values,0.5)).put("p95_ms",percentile(values,0.95)).put("mean_ms",sum/values.length);
     }
     public interface DeviceInfo { JSONObject read()throws Exception; }
-    /** Se llama una sola vez desde queueEvent: el bucle completo no presenta cuadros. */
-    public void sustained(int n,DeviceInfo deviceInfo) {
+    /** Arranca desde onDrawFrame con contexto y superficie listos; no presenta en su bucle. */
+    private void sustained(int n,DeviceInfo deviceInfo) {
         if(sustainedRunning)return;
         sustainedRunning=true;
         try {
+            monitor.phase("STARTING",-1,-1,System.nanoTime());
             need(!fatal&&program!=0&&android.opengl.EGL14.eglGetCurrentContext()!=android.opengl.EGL14.EGL_NO_CONTEXT,"Espera a que aparezca la escena antes de medir");need(bench==null,"Ya hay una prueba activa");
             new Sustained(n,deviceInfo).run();
-        } catch(Exception error){listener.failure("No se pudo crear la prueba sostenida: "+error);}
+        } catch(Exception error){monitor.finish("ERROR",error.toString(),System.nanoTime());listener.failure("No se pudo completar la prueba sostenida: "+error);}
         finally{sustainedRunning=false;liveStart=0;liveFrames=0;}
+    }
+    private JSONObject monitorJson(ProbeMonitor.Snapshot s)throws Exception {
+        return new JSONObject().put("active",s.active).put("stop_requested",s.stopRequested).put("stage",s.stage).put("operation",s.operation)
+            .put("count",s.count).put("route",s.route).put("block_zero_based",s.block).put("elapsed_ns",s.elapsedNs)
+            .put("operation_elapsed_ns",s.operationNs).put("since_confirmation_ns",s.sinceConfirmationNs).put("waiting_for_confirmation",s.waiting)
+            .put("frames_submitted",s.submitted).put("frames_confirmed_including_warmup",s.confirmed).put("frames_confirmed_during_measurement",s.measured)
+            .put("latest_window_fps",s.windowFps<0?JSONObject.NULL:s.windowFps).put("message",s.message);
+    }
+    public JSONObject diagnostic()throws Exception {
+        return new JSONObject().put("format","GPU-VIRTUAL-C07-diagnostic-v1").put("source_commit",BuildInfo.SOURCE_SHA)
+            .put("completed_benchmark_result",false).put("hardware_sustained_test_passed",false).put("device",Build.MODEL)
+            .put("monitor",monitorJson(probe())).put("scope","UI snapshot only; elapsed timer is not evidence of GPU progress. Frames increment only after signaled GLsync.");
     }
     private void continuing(){if(stopRequested)throw new CancellationException("Prueba interrumpida");}
     private int finishBatch(int route,int n,long firstFrame) {
@@ -211,28 +240,31 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
         try {
             for(int j=0;j<batchSize;j++) {
                 continuing();int tick=1024+(int)((firstFrame+j)%64)*8;
+                monitor.operation("PREPARE_AND_SUBMIT",System.nanoTime());
                 draw(route,n,tick,framebuffers[route],SIDE,SIDE,false);
                 fences[j]=GLES30.glFenceSync(GLES30.GL_SYNC_GPU_COMMANDS_COMPLETE,0);
-                need(fences[j]!=0,"No se pudo crear la confirmacion GPU");submitted++;
+                need(fences[j]!=0,"No se pudo crear la confirmacion GPU");submitted++;monitor.submitted();
             }
+            monitor.operation("FLUSH",System.nanoTime());
             GLES30.glFlush();
             for(int j=0;j<submitted;j++) {
+                monitor.operation("WAIT_FENCE",System.nanoTime());
                 long waitStart=System.nanoTime();
                 while(true) {
                     continuing();
                     int result=GLES30.glClientWaitSync(fences[j],0,1_000_000L);
-                    if(result==GLES30.GL_ALREADY_SIGNALED||result==GLES30.GL_CONDITION_SATISFIED){finished++;break;}
+                    if(result==GLES30.GL_ALREADY_SIGNALED||result==GLES30.GL_CONDITION_SATISFIED){finished++;monitor.confirmed(System.nanoTime());break;}
                     need(result==GLES30.GL_TIMEOUT_EXPIRED,"Fallo al confirmar un cuadro GPU");
                     need(System.nanoTime()-waitStart<30_000_000_000L,"La GPU no completo el lote dentro del plazo de diagnostico");
                 }
             }
             check();return finished;
-        } finally {for(long fence:fences)if(fence!=0)GLES30.glDeleteSync(fence);}
+        } finally {monitor.operation("RELEASE_FENCES",System.nanoTime());for(long fence:fences)if(fence!=0)GLES30.glDeleteSync(fence);}
     }
     private final class Sustained {
         final int n;
         final DeviceInfo deviceInfo;
-        final File archive=new File(cache,"GPU-VIRTUAL-C06-RESULTADO.zip");
+        final File archive=new File(cache,"GPU-VIRTUAL-C07-RESULTADO.zip");
         final ZipOutputStream zip;
         final JSONObject report=new JSONObject();
         final JSONArray blocks=new JSONArray(),windows=new JSONArray(),captures=new JSONArray();
@@ -248,6 +280,8 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
         }
         void put(String name,byte[] value)throws Exception{zip.putNextEntry(new ZipEntry(name));zip.write(value);zip.closeEntry();}
         void validate(String prefix,int tick)throws Exception {
+            monitor.phase(prefix.equals("before")?"VALIDATING_BEFORE":"VALIDATING_AFTER",-1,-1,System.nanoTime());
+            monitor.operation("VERIFY_IMAGES_AND_STATE",System.nanoTime());
             continuing();Sample a=draw(0,n,tick,framebuffers[0],SIDE,SIDE,true);
             draw(1,n,tick,framebuffers[1],SIDE,SIDE,true);
             byte[] first=pixels(framebuffers[0]),second=pixels(framebuffers[1]);
@@ -260,11 +294,13 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
             validatedPairs++;verifiedWords+=n*4L;
         }
         void warm(int route)throws Exception {
+            monitor.phase("WARMUP",route,-1,System.nanoTime());monitor.operation("WAIT_PREVIOUS",System.nanoTime());
             continuing();listener.progress((route==0?"Datos por luz":"Reglas + cambios")+" · calentamiento 2 s");
             GLES30.glFinish();long begin=System.nanoTime(),frames=0;
             do{frames+=finishBatch(route,n,frames);}while(System.nanoTime()-begin<2_000_000_000L);
         }
         void measure(int phase,int route)throws Exception {
+            monitor.phase("MEASURING",route,phase,System.nanoTime());monitor.operation("WAIT_PREVIOUS",System.nanoTime());
             continuing();GLES30.glFinish();
             JSONObject before=deviceInfo.read();long start=System.nanoTime(),last=start,windowFrames=0,frames=0;
             while(System.nanoTime()-start<5_000_000_000L) {
@@ -272,6 +308,7 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
                 frames+=completed;windowFrames+=completed;long now=System.nanoTime();
                 if(now-last>=1_000_000_000L) {
                     double rate=windowFrames*(1e9/(now-last));
+                    monitor.window(rate);
                     windows.put(new JSONObject().put("block",phase).put("route",route).put("frames_completed",windowFrames).put("elapsed_ns",now-last).put("fps",rate));
                     listener.progress(String.format(Locale.ROOT,"%s · bloque %d / 12\n%.1f FPS calculados · %d cuadros terminados\n512 × 512 · sin presentar cuadros",route==1?"Reglas + cambios":"Datos por luz",phase+1,rate,frames));
                     last=now;windowFrames=0;
@@ -289,7 +326,7 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
         void run()throws Exception {
             long wallStart=System.nanoTime();boolean success=false;
             try {
-                report.put("format","GPU-VIRTUAL-C06-sustained-v1");report.put("source_commit",BuildInfo.SOURCE_SHA);report.put("hardware_sustained_test_passed",false);
+                report.put("format","GPU-VIRTUAL-C07-sustained-v1");report.put("source_commit",BuildInfo.SOURCE_SHA);report.put("hardware_sustained_test_passed",false);
                 report.put("device",Build.MODEL);report.put("fingerprint",Build.FINGERPRINT);report.put("android_api",Build.VERSION.SDK_INT);
                 report.put("gl_renderer",renderer);report.put("gl_vendor",vendor);report.put("gl_version",version);
                 report.put("hardware_driver_identified",hardware);report.put("software_renderer_detected",software);report.put("emulator_detected",emulated);
@@ -298,6 +335,8 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
                 report.put("device_start",deviceInfo.read());report.put("blocks",blocks);report.put("one_second_windows",windows);report.put("captures",captures);
                 report.put("measurement","Completed render frames / actual measured wall time; CPU preparation, GL submission, instrumentation and fence waits included");
                 report.put("presentation_inside_measurement",false);report.put("screen_fps_used_in_calculation",false);report.put("sleep_or_target_fps",false);
+                report.put("start_context","onDrawFrame after pending UI request; resources and EGL context ready");
+                report.put("progress_instrumentation","Independent 500 ms UI heartbeat reads Java snapshots; per-submission and per-signaled-fence counters. Timer alone does not imply GPU progress; telemetry cost included.");
                 report.put("completion","One GLsync fence per submitted frame; count increments only after that fence signals; pipeline of eight frames");
                 report.put("schedule","Twelve >=5 s blocks in ABBA/BAAB/ABBA order; six per route, >=30 s active per route, shared sustained device load");
                 report.put("phase_sequence","tick=1024+8*(route_frame_index modulo 64); same cyclic scene sequence per route, independent of screen cadence");
@@ -315,14 +354,19 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
             } catch(Exception error) {
                 report.put("status",error instanceof CancellationException?"CANCELLED":"NOT_VERIFIED");report.put("error",error.toString());
             } finally {
+                monitor.phase("SAVING",-1,-1,System.nanoTime());
                 report.put("verified_image_pairs",validatedPairs);report.put("gpu_state_words_checked",verifiedWords);
                 report.put("routes",new JSONArray().put(routeReport(0)).put(routeReport(1)));report.put("pss_kib_end",Debug.getPss());
                 report.put("device_end",deviceInfo.read());report.put("total_wall_ns_including_validation_and_warmup",System.nanoTime()-wallStart);
+                report.put("monitor_before_save",monitorJson(probe()));JSONArray events=new JSONArray();
+                for(ProbeMonitor.Event e:monitor.events())events.put(new JSONObject().put("stage",e.stage).put("route",e.route).put("block_zero_based",e.block).put("elapsed_ns",e.elapsedNs));
+                report.put("monitor_events",events);
                 put("report.json",report.toString(2).getBytes(StandardCharsets.UTF_8));zip.close();
                 // Vuelve a mostrar una sola imagen una vez finalizada la medicion.
                 if(success)GLES30.glFinish();else GLES30.glFlush();GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER,0);
+                monitor.finish(success?"DONE":report.optString("status","ERROR"),report.optString("error",""),System.nanoTime());
                 String summary=String.format(Locale.ROOT,"%s\nReglas: %.1f FPS sostenidos\nDatos: %.1f FPS sostenidos\nMejor bloque: %.1f / %.1f FPS\n%,d luces · 512 × 512 · cuadros terminados\n%s",
-                    success&&hardware?"PRUEBA FISICA COMPLETA":"RESULTADO PARCIAL O SIN VERIFICAR",stats.fps(1),stats.fps(0),stats.bestBlockFps(1),stats.bestBlockFps(0),n,
+                    success&&hardware?"SOSTENIDA · PRUEBA COMPLETA":"SOSTENIDA · PARCIAL O SIN VERIFICAR",stats.fps(1),stats.fps(0),stats.bestBlockFps(1),stats.bestBlockFps(0),n,
                     success?"FPS de calculo fuera de pantalla.":report.optString("error","Driver sin clasificar"));
                 listener.result(archive,report,summary);
             }
@@ -408,7 +452,7 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
         void close()throws Exception {
             report.put("verified_image_pairs",verifiedPairs);report.put("gpu_state_words_checked",checkedWords);report.put("pss_kib_end",Debug.getPss());
             put("report.json",report.toString(2).getBytes(StandardCharsets.UTF_8));zip.close();closed=true;bench=null;
-            StringBuilder text=new StringBuilder();
+            StringBuilder text=new StringBuilder("PRUEBA CORTA · LATENCIA EN MS\n");
             if(!report.optBoolean("hardware_graphics_test_passed"))text.append("Resultado sin verificar en GPU fisica.\n").append(report.optString("error","Driver sin clasificar")).append("\n");
             else text.append("Imagenes y estado coinciden en la GPU.\n");
             for(int i=0;i<cases.length();i++) {
@@ -420,3 +464,4 @@ public final class SceneRenderer implements GLSurfaceView.Renderer {
         }
     }
 }
+

@@ -250,3 +250,23 @@ calculo y mejor bloque. Conserva capturas de correccion antes y despues,
 todos los bloques y ventanas de tiempo, con cancelacion y resultado parcial.
 La compilacion y el control llvmpipe son pruebas CPU; los FPS del telefono
 siguen requiriendo que se ejecute el nuevo APK fisicamente.
+
+Una captura posterior del usuario muestra C06 completado en la Mali-G68:
+197,7 FPS sostenidos con reglas y 162,9 con datos para 65.536 luces a 512 por
+512 (+21,36 % de cuadros/s). Son valores reportados por la app en la captura;
+la revision independiente de los bloques del ZIP sigue pendiente.
+
+## C07: progreso visible y arranque con contexto listo
+
+La [medicion activa Android](android-graphics/README.md) inicia el ensayo desde
+`onDrawFrame` y muestra un panel de progreso con reloj independiente del hilo
+GL, etapa, ultima operacion y cuadros confirmados por fences. Un reloj que
+avanza no se cuenta como avance GPU. Una espera prolongada se hace visible
+sin fabricar FPS; se puede preparar un diagnostico y solicitar la detencion.
+
+Conserva el protocolo sostenido de C06 y los mismos shaders. Se etiqueta la
+comparacion corta por separado y se limpia el resultado anterior al iniciar.
+El APK C07 puede coexistir con las versiones previas. Las pruebas anfitrionas
+comprueban los contadores; el panel nuevo requiere ejecutarse en el telefono.
+C06 ya completo el ensayo segun la nueva captura; C07 aclara su espera.
+

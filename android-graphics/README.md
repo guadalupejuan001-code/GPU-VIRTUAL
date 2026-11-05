@@ -1,15 +1,53 @@
-# C06: FPS sostenidos fuera de pantalla
+# C07: medicion activa y diagnostico de FPS sostenidos
 
-Instalar **GPU-VIRTUAL-C06-FPS-SOSTENIDOS.apk**, elegir la cantidad de luces y
-pulsar **Medir FPS · 60 segundos**. La vista queda fija mientras la GPU sigue
-dibujando en framebuffers de 512 por 512. No se presenta cada cuadro ni se
+Instalar **GPU-VIRTUAL-C07-MEDICION-ACTIVA.apk**, elegir la cantidad de luces y
+pulsar **Medir FPS · 60 segundos**. Un panel sustituye la imagen del visor y
+muestra tiempo transcurrido, etapa, cuadros confirmados y ultima ventana de
+FPS calculada. La GPU dibuja en framebuffers de 512 por 512. No se presenta cada cuadro ni se
 espera al refresco entre cuadros dentro del bucle de medicion. Al terminar,
-**Guardar prueba** exporta `GPU-VIRTUAL-C06-RESULTADO.zip`.
+**Guardar prueba** exporta `GPU-VIRTUAL-C07-RESULTADO.zip`.
 
-La app C06 usa el paquete `x.gpu.sustained` y puede coexistir con la C05.
+La app C07 usa el paquete `x.gpu.progress` y puede coexistir con C05 y C06.
 Conserva su escena y comparacion de latencia como referencia. La prueba nueva
 usa el mismo perfil de reglas y las mismas excepciones; no integra un motor
 ajeno, RFS1, el nucleo C01 ni Ether.
+
+## Progreso y arranque de C07
+
+El ensayo arranca desde el siguiente `onDrawFrame`, con el contexto EGL y sus
+recursos listos. La peticion desde UI solo prepara el estado y solicita ese
+cuadro. C06 lo arrancaba como evento del hilo GL. Tras una espera que parecia
+una pausa, el usuario compartio una captura C06 de ensayo completado: la app
+reporta 197,7 FPS con reglas y 162,9 con datos para 65.536 luces, a 512 por 512.
+El incremento reportado es 21,36 %. La captura no aporta los bloques crudos;
+queda pendiente revisar el ZIP para verificar esos valores independientemente.
+
+Un temporizador del hilo de interfaz lee snapshots Java cada 500 ms. No espera
+una llamada GL ni una nueva confirmacion para actualizarse. El reloj muestra
+tiempo de UI: **por si solo no demuestra que la GPU avance**. Los contadores
+solo aumentan al senalarse el fence real de cada cuadro. Se distinguen todos
+los cuadros confirmados (incluido calentamiento) de los confirmados durante
+medicion; estos ultimos pueden incluir un bloque parcial cancelado y no
+sustituyen la tasa agregada de los bloques completos del resultado final.
+
+Si pasan al menos cinco segundos de calentamiento/medicion sin una nueva
+confirmacion, se muestra la espera y la ultima operacion: preparar/enviar,
+flush, espera de fence o liberacion. El diagnostico no declara por eso un
+bloqueo del silicio. Durante las verificaciones se muestra su propia etapa.
+Una llamada nativa que no retorna puede retrasar la cancelacion: el monitor
+no termina llamadas del controlador ni inventa cuadros mientras espera.
+
+**Guardar diagnostico** captura un JSON incompleto con estos datos y solicita
+detener. El selector de archivos se abre cuando termina el trabajo GL; el ZIP
+parcial queda tambien disponible. No se presenta este JSON como resultado de
+rendimiento. Al iniciar un ensayo se retira el resumen anterior; la prueba
+corta se identifica como latencia en ms para no confundirla con FPS sostenidos.
+
+El panel deja el `GLSurfaceView` montado para mantener la superficie y su
+contexto. Es una mejora de arranque y observabilidad; su funcionamiento en la
+Mali del usuario requiere ejecutar el APK. C06 ya completo el ensayo segun la
+nueva captura. C07 hace visible la espera y no agrega animacion de la escena
+al ensayo ni afirma haber resuelto un bloqueo fisico demostrado.
 
 ## Medicion sostenida
 
@@ -26,8 +64,8 @@ ajeno, RFS1, el nucleo C01 ni Ether.
 - La duracion total incluye ademas calentamiento, verificacion y guardado.
   Se puede detener desde la app; salir tambien cancela y guarda lo parcial.
 
-El bucle completo se ejecuta dentro de una sola tarea del hilo GL, fuera del
-callback repetido de cuadros visibles. Entre sus cuadros no llama a
+El bucle completo se ejecuta dentro de un solo `onDrawFrame` del hilo GL,
+antes de devolver el control al visor. Entre sus cuadros no llama a
 `eglSwapBuffers`, ni solicita otro cuadro de pantalla, ni duerme a un FPS
 objetivo. La UI puede actualizar el progreso; ese coste de instrumentacion y
 los controles del driver/sistema siguen formando parte del entorno medido.
@@ -56,7 +94,7 @@ treinta segundos consecutivos aislados por metodo ni una estabilizacion
 termica garantizada. Preparacion CPU, llamadas GL y espera de fences entran
 en el tiempo real. El buffer denso se conserva en ambos metodos para comparar.
 
-## Verificacion de C06
+## Verificacion de C07
 
 `SustainedTest` contrasta tasas ponderadas, bloques desiguales, ausencia de un
 tope de 60, estados vacios y rechazos sin alterar los acumulados. Son 18
@@ -64,6 +102,10 @@ comprobaciones anfitrionas. `verify_host.py` verifica ademas 24 fences GL
 reales sobre llvmpipe CPU, incluidos ocho dibujos en un lote sin presentacion.
 Se mantienen las 690.184 palabras y ocho parejas de imagenes del perfil C05.
 Estas verificaciones y la construccion Android no se declaran ejecucion fisica.
+
+`MonitorTest` comprueba 11 casos de telemetria: tiempo independiente de los
+cuadros, envio sin confirmacion, calentamiento separado, ventanas reales,
+detencion, finalizacion y reinicio sin conservar contadores antiguos.
 
 El control del driver usa `glFenceSync`, `glClientWaitSync` y `glDeleteSync` de
 OpenGL ES. Cada cuadro confirmado sigue teniendo el trabajo de rasterizacion
@@ -195,3 +237,4 @@ Referencias de las interfaces anfitrionas:
 
 - https://developer.android.com/reference/android/opengl/GLES30
 - https://developer.android.com/reference/android/opengl/GLSurfaceView.Renderer
+

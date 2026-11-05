@@ -8,9 +8,10 @@ android_tools="$sdk_root/build-tools/35.0.0"
 test -f "$android_jar"
 mkdir -p build/gen/x/gpu/visual build/classes build/dex build/host build/dist
 python3 make_fixtures.py
-java com.sun.tools.javac.Main -d build/host src/x/gpu/visual/SceneState.java src/x/gpu/visual/SustainedStats.java host/SceneTest.java host/SustainedTest.java
+java com.sun.tools.javac.Main -d build/host src/x/gpu/visual/SceneState.java src/x/gpu/visual/SustainedStats.java src/x/gpu/visual/ProbeMonitor.java host/SceneTest.java host/SustainedTest.java host/MonitorTest.java
 java -cp build/host SceneTest build/scene-fixtures.dat | tee build/dist/scene-host-validation.json
 java -cp build/host SustainedTest | tee build/dist/sustained-host-validation.json
+java -cp build/host MonitorTest | tee build/dist/monitor-host-validation.json
 source_sha="${GITHUB_SHA:-local-uncommitted}"
 python3 - "$source_sha" <<'PY'
 from pathlib import Path
@@ -40,7 +41,7 @@ if [[ ! -f build/scene-debug.keystore ]]; then
     -keypass android -alias scene -keyalg RSA -keysize 2048 -validity 3650 \
     -dname "CN=GPU VIRTUAL Scene Test,O=GPU VIRTUAL,C=US"
 fi
-apk="build/dist/GPU-VIRTUAL-C06-FPS-SOSTENIDOS.apk"
+apk="build/dist/GPU-VIRTUAL-C07-MEDICION-ACTIVA.apk"
 "$android_tools/apksigner" sign --ks build/scene-debug.keystore --ks-key-alias scene \
   --ks-pass pass:android --key-pass pass:android --out "$apk" build/aligned.apk
 "$android_tools/apksigner" verify --verbose "$apk" > build/dist/signature-validation.txt
@@ -48,7 +49,7 @@ apk="build/dist/GPU-VIRTUAL-C06-FPS-SOSTENIDOS.apk"
 python3 - <<'PY'
 from pathlib import Path
 import json,hashlib,zipfile,shutil
-p=Path('build/dist/GPU-VIRTUAL-C06-FPS-SOSTENIDOS.apk')
+p=Path('build/dist/GPU-VIRTUAL-C07-MEDICION-ACTIVA.apk')
 with zipfile.ZipFile(p) as z:
  assert z.testzip() is None and 'classes.dex' in z.namelist()
  for name in ['scene.glsl','vertex.glsl','fragment.glsl']:assert z.read('assets/'+name)==Path('assets',name).read_bytes()
@@ -58,6 +59,8 @@ report={'apk':p.name,'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_byt
         'signature_verified':True,'hardware_gpu_executed':False,'android_device_run_required':True,
         'scene_host':json.loads(Path('build/dist/scene-host-validation.json').read_text()),
         'sustained_host':json.loads(Path('build/dist/sustained-host-validation.json').read_text()),
-        'profile':'C06 sustained offscreen throughput; C05 scene rules, four exact exceptions; not an arbitrary GPU or RFS1 runtime'}
+        'monitor_host':json.loads(Path('build/dist/monitor-host-validation.json').read_text()),
+        'profile':'C07 observable sustained offscreen throughput; C05 scene rules, four exact exceptions; not an arbitrary GPU or RFS1 runtime'}
 Path('build/dist/validation.json').write_text(json.dumps(report,indent=2)+'\n');print(json.dumps(report))
 PY
+
