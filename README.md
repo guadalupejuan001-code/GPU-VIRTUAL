@@ -1,5 +1,12 @@
 # GPU VIRTUAL
 
+**Base oficial: C12.** Las proximas actualizaciones parten de `main` actualizado.
+La referencia fija [baseline/c12](https://github.com/guadalupejuan001-code/GPU-VIRTUAL/tree/baseline/c12)
+conserva este punto de partida. [VERSION](VERSION) indica el ciclo actual y
+[GPU_BASELINE.json](GPU_BASELINE.json) registra el origen, los componentes y
+los formatos que deben conservarse. Esta base reune el ejecutor C12 y el modulo
+compacto de REgraphics que admite geometria compartida de solo lectura.
+
 Proyecto propio de representacion compacta del **estado de ejecucion** de una
 GPU virtual. C01 conserva el nucleo original; [C11](docs/C11-ejecucion-estados.md)
 lo reutiliza para evolucionar juntos registros, control por invocacion, memoria,

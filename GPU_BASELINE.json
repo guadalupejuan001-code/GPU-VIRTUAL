@@ -1,0 +1,47 @@
+{
+  "schema": "gpu-virtual-baseline-v1",
+  "baseline_version": "C12",
+  "repository": "guadalupejuan001-code/GPU-VIRTUAL",
+  "development_branch": "main",
+  "frozen_ref": "baseline/c12",
+  "required_ancestor": "84d015c6897035d7408db32e3f7ee1f7cb51f4f2",
+  "components": {
+    "execution_core": {
+      "cycle": "C12",
+      "validated_commit": "010cad77a389aebab31ebf054086c7ced18cf4fb",
+      "profiles": [
+        "C11",
+        "C12"
+      ]
+    },
+    "regraphics_transport": {
+      "validated_commit": "6addb1b60cb825977ffa992127d5189086a9a6c8",
+      "protocol": "XFG4 revision 4",
+      "vertex_bytes": 24,
+      "read_only_buffers": true
+    }
+  },
+  "preserved_formats": [
+    "xgpu 1",
+    "xgpu 2",
+    "xgpu 3",
+    "XGPU-C11 1",
+    "XGPU-C12 1"
+  ],
+  "required_paths": [
+    "include/estado_gpu.hpp",
+    "include/ejecucion_gpu.hpp",
+    "include/relaciones_gpu.hpp",
+    "include/float32_gpu.hpp",
+    "include/snapshot_gpu.hpp",
+    "include/programa_ejecucion.hpp",
+    "android-graphics/shared/x/gpu/virtual/CompactTriangleStream.java",
+    "build-c12.sh"
+  ],
+  "future_updates": {
+    "start_from": "origin/main",
+    "preserve_ancestry": true,
+    "preserve_frozen_ref": true,
+    "advance_version_explicitly": true
+  }
+}
