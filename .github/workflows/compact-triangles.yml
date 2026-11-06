@@ -1,0 +1,15 @@
+name: Exact compact triangle transport
+on: [push, pull_request, workflow_dispatch]
+permissions: {contents: read}
+jobs:
+  exact:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: '17'}
+      - run: |
+          mkdir -p build/compact-triangles
+          javac -d build/compact-triangles android-graphics/shared/x/gpu/virtual/CompactTriangleStream.java android-graphics/shared-tests/CompactTriangleStreamTest.java
+          java -cp build/compact-triangles x.gpu.virtual.CompactTriangleStreamTest
