@@ -1,8 +1,16 @@
 # GPU VIRTUAL
 
-Primer experimento de una representacion compacta del **estado de ejecucion**
-de una GPU virtual. El codigo se escribio para este proyecto, desde cero, con
-C++17 y su biblioteca estandar. El ejecutor corre sobre la CPU anfitriona.
+Proyecto propio de representacion compacta del **estado de ejecucion** de una
+GPU virtual. C01 conserva el nucleo original; [C11](docs/C11-ejecucion-estados.md)
+lo reutiliza para evolucionar juntos registros, control por invocacion, memoria,
+barreras y una cola de despachos dependientes. El codigo del nucleo se escribio
+desde cero con C++17 y su biblioteca estandar. El ejecutor corre sobre la CPU
+anfitriona.
+
+C11 guarda y recupera el estado logico completo de su perfil uint32, incluidos
+programas, mascaras, memoria y planificador. No es una captura de todos los
+estados internos de un chip fisico, ni una integracion automatica en el juego.
+Los ciclos graficos C02-C10 siguen teniendo el alcance descrito mas abajo.
 
 El principio recuperado de Ether es mantener una autoridad de estado descrita
 por reglas, relaciones y diferencias; transformar esa descripcion y obtener
@@ -138,11 +146,14 @@ que un estado arbitrario resulte compacto.
 | Detalles por registro | 65.536 |
 | Materializacion por consulta | 16.777.216 valores uint32 |
 
-Pendientes para ampliar la GPU virtual: operaciones de bits, comparaciones
+Pendientes del nucleo **C01**: operaciones de bits, comparaciones
 generales, punto flotante con redondeo definido, memoria compartida, atomicos,
 sincronizacion entre grupos, multiples despachos y graficos/texturas.
 Las capacidades no admitidas se rechazan; no se sustituyen silenciosamente
 por un simulador externo.
+
+C11 incorpora operaciones de bits, comparaciones, saltos, memoria y atomicos en
+un perfil ampliado explicito. No cambia la semantica ni el formato de C01.
 
 Las pruebas adicionales de AddressSanitizer y UndefinedBehaviorSanitizer
 pasaron. LeakSanitizer no pudo ejecutarse en el entorno trazado; esa comprobacion
@@ -324,4 +335,22 @@ manteniendo el buffer readonly, las cuatro rutas y su salida exacta.
 Se conservan los controles de valores e imagenes y se agrega compilacion
 independiente de los GLSL ES 3.10 de produccion con glslangValidator. La
 correccion de compilacion y los FPS nuevos requieren verificar el APK en Mali.
+
+## C11: continuar desde el estado de ejecucion conjunto
+
+[Estado de ejecucion C11](docs/C11-ejecucion-estados.md) integra directamente
+`Field` y `Mode` del nucleo C01 con PCs por invocacion, mascaras de ejecucion,
+memoria global y compartida, atomicos, barreras con epocas y dependencias entre
+despachos. El formato propio `.xgpu 2` admite saltos con etiquetas. Los programas
+`.xgpu 1` se ejecutan tambien mediante la nueva autoridad.
+
+`gpu_c11` puede avanzar un numero de pasos, inspeccionar el estado sin modificarlo
+y reanudarlo desde otro proceso. Sus checkpoints conservan todos los campos del
+perfil, el programa y los cursores necesarios; el guardado POSIX reemplaza el
+archivo anterior solo despues de escribir y sincronizar el candidato.
+
+La referencia escalar mantiene PCs y arreglos por invocacion, sin usar los campos
+compactos para evolucionar. Contrasta todos los registros, memorias, salidas,
+esperas, epocas y cursores en cada paso de las cargas pequenas. C01 conserva sus
+pruebas originales. Ver comandos, presupuestos y limites en la documentacion C11.
 

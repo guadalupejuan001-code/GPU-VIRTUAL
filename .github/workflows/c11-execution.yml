@@ -1,0 +1,36 @@
+name: C11 - estado de ejecucion conjunto
+
+'on':
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  execution-state:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Obtener la revision exacta
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Conservar equivalencia del nucleo original
+        run: bash build.sh
+      - name: Ejecucion conjunta y recuperacion entre procesos
+        run: bash build-c11.sh
+      - name: Sanitizadores de ejecucion y memoria
+        run: bash sanitizers-c11.sh
+      - name: Conservar programas y checkpoints completos
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: GPU-VIRTUAL-C11-${{ github.sha }}
+          path: |
+            evidence/current/c11/
+            build/gpu_c11
+            build/ejecucion_pruebas
+          if-no-files-found: error
+          retention-days: 30
