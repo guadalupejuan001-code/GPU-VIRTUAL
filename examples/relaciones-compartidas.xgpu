@@ -1,0 +1,20 @@
+xgpu 3
+dominio 65536
+grupo 64
+compartida 64
+global 65536
+local r0
+indice r1
+constante r2 63
+xor r3 r0 r2
+constante r4 3
+suma r5 r3 r4
+suma r6 r3 r4
+producto r7 r5 r6
+guarda_compartida r0 r7
+barrera
+carga_compartida r5 r0
+guarda_global r1 r5
+carga_global r6 r1
+salida r6
+fin

@@ -72,11 +72,14 @@ struct ExecutionCodec {
     }
     static std::string encode(const Execution& execution) {
         execution.validate();
+        const bool relational=execution.profile_==ExecutionProfile::C12;
         std::vector<FieldRoot> fields;
-        const auto identify=[&](const FieldRoot& field)->std::size_t {
-            auto p=std::find(fields.begin(),fields.end(),field);
-            if(p==fields.end()) { fields.push_back(field); return fields.size()-1; }
-            return static_cast<std::size_t>(p-fields.begin());
+        std::unordered_map<const Value*,std::size_t> ids;
+        std::function<std::size_t(const FieldRoot&)> identify=[&](const FieldRoot& field)->std::size_t {
+            if(!field) return max_value_nodes;
+            auto p=ids.find(field.get());if(p!=ids.end()) return p->second;
+            if(relational) {identify(field->left());identify(field->right());}
+            const auto id=fields.size();fields.push_back(field);ids.emplace(field.get(),id);return id;
         };
         identify(execution.global_);
         for(const auto& d:execution.jobs_) {
@@ -89,9 +92,19 @@ struct ExecutionCodec {
         out<<execution.revision_<<' '<<execution.dispatch_cursor_<<'\n';
         out<<c.steps<<' '<<c.scalar_lane_evaluations<<' '<<c.global_reads<<' '<<c.global_writes<<' '
            <<c.shared_reads<<' '<<c.shared_writes<<' '<<c.atomics<<' '<<c.barrier_releases<<'\n';
+        if(relational) out<<c.relation_nodes_created<<' '<<c.relation_reuses<<' '<<c.relation_scalar_checks<<' '<<c.period_values_checked<<'\n';
         out<<fields.size()<<'\n';
-        for(const auto& field:fields) write_field(out,*field);
+        for(const auto& field:fields) {
+            if(!relational) {write_field(out,field->field());continue;}
+            out<<static_cast<unsigned>(field->kind())<<' '<<field->count<<' '<<field->immediate()<<' '
+               <<identify(field->left())<<' '<<identify(field->right())<<' '<<field->mask().count<<' ';
+            write_mask(out,field->mask());
+            out<<field->patches().size()<<'\n';
+            for(const auto& p:field->patches()) out<<p.first<<' '<<p.second<<'\n';
+            if(field->is_field()) write_field(out,field->field());
+        }
         out<<execution.jobs_.size()<<'\n';
+        if(relational) out<<identify(execution.global_)<<'\n';
         for(const auto& d:execution.jobs_) {
             out<<d.count<<' '<<d.local_size<<' '<<d.shared_words<<' '<<d.pc_cursor<<'\n';
             out<<d.dependencies.size(); for(auto dependency:d.dependencies) out<<' '<<dependency;
@@ -114,11 +127,12 @@ struct ExecutionCodec {
         out<<"END\n";
         const auto payload=out.str();
         require(payload.size()<maximum_bytes-128,"archivo C11 supera 64 MiB");
-        return "XGPU-C11 1\n"+std::to_string(payload.size())+" "+std::to_string(checksum(payload))+"\n"+payload;
+        return std::string(relational?"XGPU-C12 1\n":"XGPU-C11 1\n")+std::to_string(payload.size())+" "+std::to_string(checksum(payload))+"\n"+payload;
     }
     static Execution decode(const std::string& bytes) {
         require(bytes.size()<=maximum_bytes,"archivo C11 demasiado grande");
-        const std::string magic="XGPU-C11 1\n";
+        const bool relational=bytes.compare(0,11,"XGPU-C12 1\n")==0;
+        const std::string magic=relational?"XGPU-C12 1\n":"XGPU-C11 1\n";
         require(bytes.compare(0,magic.size(),magic)==0,"cabecera C11 invalida");
         const auto line=bytes.find('\n',magic.size());
         require(line!=std::string::npos && line-magic.size()<=64,"longitud de cabecera C11 invalida");
@@ -138,14 +152,38 @@ struct ExecutionCodec {
         counters.global_reads=in.integer(); counters.global_writes=in.integer();
         counters.shared_reads=in.integer(); counters.shared_writes=in.integer();
         counters.atomics=in.integer(); counters.barrier_releases=in.integer();
-        const auto nf=in.integer(1+limits.dispatches*(register_count+2));
+        if(relational) {
+            counters.relation_nodes_created=in.integer();counters.relation_reuses=in.integer();
+            counters.relation_scalar_checks=in.integer();counters.period_values_checked=in.integer();
+        }
+        const auto nf=in.integer(relational?max_value_nodes:1+limits.dispatches*(register_count+2));
         require(nf>0,"archivo C11 sin memoria");
         std::vector<FieldRoot> fields;
-        for(Index f=0;f<nf;++f) fields.push_back(read_field(in));
-        Execution result(fields[0]->count,limits);
-        result.global_=fields[0]; result.revision_=revision; result.counters_=counters;
+        for(Index f=0;f<nf;++f) {
+            if(!relational) {fields.push_back(read_field(in));continue;}
+            const auto kind=static_cast<ValueKind>(in.integer(static_cast<unsigned>(ValueKind::Rank)));
+            const auto n=in.integer(domain_limit),immediate=in.integer(domain_limit);
+            const auto a=in.integer(max_value_nodes),b=in.integer(max_value_nodes),mask_count=in.integer(domain_limit);
+            require((a==max_value_nodes || a<f) && (b==max_value_nodes || b<f),"referencia relacional futura o ciclica");
+            auto mask=read_mask(in,mask_count);const auto np=in.integer(max_details);
+            std::map<Index,Word> patches;
+            for(Index p=0;p<np;++p) {
+                const auto at=in.integer(n?n-1:0);const auto word=static_cast<Word>(in.integer(UINT32_MAX));
+                require(patches.emplace(at,word).second,"parche relacional duplicado");
+            }
+            if(kind==ValueKind::Polynomial) {
+                auto field=read_field(in);
+                require(field->count==n && !immediate && a==max_value_nodes && b==max_value_nodes && mask.count==n && mask.full() && patches.empty(),"campo relacional incompatible");
+                fields.push_back(std::move(field));
+            } else fields.push_back(Value::node(kind,n,a==max_value_nodes?FieldRoot{}:fields[a],
+                b==max_value_nodes?FieldRoot{}:fields[b],immediate,std::move(mask),std::move(patches)));
+        }
+        Execution result(fields[0]->count,limits,relational?ExecutionProfile::C12:ExecutionProfile::C11);
+        result.revision_=revision; result.counters_=counters;
         result.dispatch_cursor_=static_cast<std::size_t>(cursor);
         const auto nj=in.integer(limits.dispatches);
+        if(relational) result.global_=fields[static_cast<std::size_t>(in.integer(nf-1))];
+        else result.global_=fields[0];
         for(Index j=0;j<nj;++j) {
             const auto n=in.integer(domain_limit);
             const auto local=static_cast<unsigned>(in.integer(1024));
@@ -156,7 +194,7 @@ struct ExecutionCodec {
             Kernel kernel; const auto ni=in.integer(100000);
             for(Index p=0;p<ni;++p) {
                 StateInstruction i{};
-                i.op=static_cast<StateOp>(in.integer(static_cast<unsigned>(StateOp::Barrier)));
+                i.op=static_cast<StateOp>(in.integer(relational?31:27));
                 i.dst=static_cast<unsigned>(in.integer(register_count-1));
                 i.a=static_cast<unsigned>(in.integer(register_count-1));
                 i.b=static_cast<unsigned>(in.integer(register_count-1));

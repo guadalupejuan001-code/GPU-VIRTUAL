@@ -7,6 +7,7 @@ struct ExecutionSource {
     Index count=0,global_words=0;
     unsigned local_size=64,shared_words=0;
     Kernel kernel;
+    ExecutionProfile profile=ExecutionProfile::C11;
 };
 inline ExecutionSource parse_execution(const std::string& text) {
     require(text.size()<=16*1024*1024,"fuente C11 demasiado grande");
@@ -24,8 +25,10 @@ inline ExecutionSource parse_execution(const std::string& text) {
         std::istringstream legacy(text); auto program=parse(legacy);
         return {program.count,program.count,64,0,Kernel::from_c01(program)};
     }
-    require(lines[0]==std::vector<std::string>({"xgpu","2"}) && lines.size()>=6,"se esperaba xgpu 2 y sus dominios");
+    const bool relational=lines[0]==std::vector<std::string>({"xgpu","3"});
+    require((relational || lines[0]==std::vector<std::string>({"xgpu","2"})) && lines.size()>=6,"se esperaba xgpu 2/3 y sus dominios");
     ExecutionSource result;
+    if(relational) result.profile=ExecutionProfile::C12;
     const auto parameter=[&](std::size_t at,const char* name,Index maximum) {
         require(lines[at].size()==2 && lines[at][0]==name,"declaracion de dominio C11 invalida");
         return decimal(lines[at][1],maximum);
@@ -46,7 +49,8 @@ inline ExecutionSource parse_execution(const std::string& text) {
     const std::map<std::string,StateOp> binary{
         {"suma",StateOp::Add},{"producto",StateOp::Multiply},{"y",StateOp::BitAnd},
         {"o",StateOp::BitOr},{"xor",StateOp::BitXor},{"desplaza_izq",StateOp::ShiftLeft},
-        {"desplaza_der",StateOp::ShiftRight},{"menor",StateOp::Less},{"igual",StateOp::Equal}};
+        {"desplaza_der",StateOp::ShiftRight},{"menor",StateOp::Less},{"igual",StateOp::Equal},
+        {"suma_f32",StateOp::FloatAdd},{"producto_f32",StateOp::FloatMultiply},{"menor_f32",StateOp::FloatLess}};
     for(std::size_t line=5;line<lines.size();++line) {
         const auto& words=lines[line]; const auto& name=words[0];
         const auto arity=[&](std::size_t n){require(words.size()==n,"operandos C11 invalidos");};
@@ -64,8 +68,8 @@ inline ExecutionSource parse_execution(const std::string& text) {
         } else if(name=="constante") {
             arity(3); i.op=StateOp::Constant; i.dst=register_id(words[1]);
             i.value=static_cast<Word>(decimal(words[2],UINT32_MAX));
-        } else if(name=="mueve") {
-            arity(3); i.op=StateOp::Move; i.dst=register_id(words[1]); i.a=register_id(words[2]);
+        } else if(name=="mueve" || name=="flotante_u32") {
+            arity(3); i.op=name=="mueve"?StateOp::Move:StateOp::FloatFromUnsigned; i.dst=register_id(words[1]); i.a=register_id(words[2]);
         } else if(binary.count(name)) {
             arity(4); i.op=binary.at(name); i.dst=register_id(words[1]);
             i.a=register_id(words[2]); i.b=register_id(words[3]);
@@ -93,6 +97,7 @@ inline ExecutionSource parse_execution(const std::string& text) {
         } else if(name=="barrera" || name=="fin") {
             arity(1); i.op=name=="barrera"?StateOp::Barrier:StateOp::Halt;
         } else throw std::runtime_error("operacion C11 desconocida: "+name);
+        require(relational || static_cast<unsigned>(i.op)<=27,"operacion requiere xgpu 3");
         result.kernel.code.push_back(i);
     }
     for(const auto& use:uses) {
@@ -106,7 +111,7 @@ inline ExecutionSource parse_execution(const std::string& text) {
     return result;
 }
 inline Execution make_execution(const ExecutionSource& source,ExecutionLimits limits={}) {
-    Execution execution(source.global_words,limits);
+    Execution execution(source.global_words,limits,source.profile);
     execution.enqueue(source.kernel,source.count,source.local_size,source.shared_words);
     return execution;
 }

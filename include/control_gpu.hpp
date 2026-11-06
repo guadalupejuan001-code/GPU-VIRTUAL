@@ -95,7 +95,7 @@ enum class StateOp : unsigned {
     ShiftLeft=14, ShiftRight=15, Less=16, Equal=17, Branch=18,
     BranchIndexLess=19, Jump=20, LoadGlobal=21, StoreGlobal=22,
     AtomicAddGlobal=23, LoadShared=24, StoreShared=25, AtomicAddShared=26,
-    Barrier=27
+    Barrier=27, FloatFromUnsigned=28, FloatAdd=29, FloatMultiply=30, FloatLess=31
 };
 struct StateInstruction {
     StateOp op;
@@ -109,7 +109,7 @@ struct Kernel {
         require(n && n<=domain_limit && !code.empty() && code.size()<=100000,"kernel fuera de presupuesto");
         require(code.back().op==StateOp::Halt,"kernel sin fin final");
         for(const auto& i:code) {
-            require(static_cast<unsigned>(i.op)<=static_cast<unsigned>(StateOp::Barrier),"operacion C11 desconocida");
+            require(static_cast<unsigned>(i.op)<=static_cast<unsigned>(StateOp::FloatLess),"operacion desconocida");
             require(i.dst<register_count && i.a<register_count && i.b<register_count,"registro C11 invalido");
             require(i.k<=domain_limit,"inmediato C11 fuera del formato");
             if(i.op==StateOp::Patch) require(i.k<n,"detalle C11 fuera del dominio");

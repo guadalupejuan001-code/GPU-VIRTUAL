@@ -151,6 +151,10 @@ artefacto `GPU-VIRTUAL-C11`.
 
 ## Estado del objetivo y siguientes ciclos
 
+Actualizacion: [C12](C12-relaciones-ejecutables.md) implementa relaciones
+ejecutables, lecturas versionadas y operaciones binary32. La importacion de
+trazas C02/RFS1 y los adaptadores de qSSD/XI continuan en los ciclos siguientes.
+
 C11 ya usa conjuntamente datos, instrucciones, control, memoria, sincronizacion
 y dependencias dentro de su perfil. Todavia no abarca todos los estados de una
 GPU general: faltan float32 con redondeo explicito, texturas/rasterizacion dentro

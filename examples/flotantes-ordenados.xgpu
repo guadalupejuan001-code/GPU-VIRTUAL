@@ -1,0 +1,16 @@
+xgpu 3
+dominio 65536
+grupo 64
+compartida 0
+global 65536
+indice r0
+flotante_u32 r1 r0
+constante r2 1065353216
+suma_f32 r3 r1 r2
+constante r4 1073741824
+producto_f32 r5 r3 r4
+suma_f32 r6 r1 r2
+menor_f32 r7 r3 r5
+guarda_global r0 r5
+salida r5
+fin

@@ -20,8 +20,7 @@ std::string read_file(const std::string& path,std::size_t maximum) {
     file.read(bytes.data(),static_cast<std::streamsize>(bytes.size()));
     xgpu::require(static_cast<bool>(file),"lectura incompleta"); return bytes;
 }
-void save(const xgpu::Execution& state,const std::string& path) {
-    const auto bytes=state.snapshot();
+void save_bytes(const std::string& bytes,const std::string& path) {
 #if defined(__unix__)
     // Never truncate the previous valid checkpoint before the replacement is complete.
     auto temporary=path+".tmp.XXXXXX";
@@ -50,14 +49,18 @@ void save(const xgpu::Execution& state,const std::string& path) {
     throw std::runtime_error("guardado atomico C11 requiere una plataforma POSIX");
 #endif
 }
+void save(const xgpu::Execution& state,const std::string& path) {save_bytes(state.snapshot(),path);}
 void report(const xgpu::Execution& state) {
     const auto& c=state.counters();
-    std::cout<<"{\"profile\":\"XGPU-C11\",\"host\":\"CPU\",\"finished\":"<<(state.finished()?"true":"false")
+    std::cout<<"{\"profile\":\""<<(state.profile()==xgpu::ExecutionProfile::C12?"XGPU-C12":"XGPU-C11")
+        <<"\",\"host\":\"CPU\",\"finished\":"<<(state.finished()?"true":"false")
         <<",\"revision\":"<<state.revision()<<",\"dispatches\":"<<state.dispatches().size()
         <<",\"steps\":"<<c.steps<<",\"scalar_lane_evaluations\":"<<c.scalar_lane_evaluations
         <<",\"global_reads\":"<<c.global_reads<<",\"global_writes\":"<<c.global_writes
         <<",\"shared_reads\":"<<c.shared_reads<<",\"shared_writes\":"<<c.shared_writes
         <<",\"atomics\":"<<c.atomics<<",\"barrier_releases\":"<<c.barrier_releases
+        <<",\"relation_nodes_created\":"<<c.relation_nodes_created<<",\"relation_reuses\":"<<c.relation_reuses
+        <<",\"relation_scalar_checks\":"<<c.relation_scalar_checks<<",\"period_values_checked\":"<<c.period_values_checked
         <<",\"complete_snapshot_bytes\":"<<state.snapshot().size()<<",\"jobs\":[";
     for(std::size_t id=0;id<state.dispatches().size();++id) {
         if(id) std::cout<<',';
@@ -78,6 +81,20 @@ void report(const xgpu::Execution& state) {
 }
 int main(int argc,char** argv) {
     try {
+        if(argc==5 && std::string(argv[1])=="export") {
+            const auto state=xgpu::Execution::restore(read_file(argv[2],xgpu::ExecutionCodec::maximum_bytes));
+            const auto id=xgpu::decimal(argv[3],255);const auto& job=state.dispatch(static_cast<std::size_t>(id));
+            xgpu::require(job.output_valid.full(),"la salida del despacho aun esta incompleta");
+            xgpu::require(job.count<=16777216,"exportacion supera 64 MiB");
+            xgpu::ValueReader reader(job.output);std::string bytes(static_cast<std::size_t>(job.count)*4,'\0');
+            for(xgpu::Index i=0;i<job.count;++i) {
+                const auto value=reader.at(i);
+                for(unsigned b=0;b<4;++b) bytes[static_cast<std::size_t>(i)*4+b]=static_cast<char>((value>>(8*b))&255);
+            }
+            save_bytes(bytes,argv[4]);
+            std::cout<<"{\"job\":"<<id<<",\"words\":"<<job.count<<",\"output_bytes\":"<<bytes.size()<<"}\n";
+            return 0;
+        }
         if(argc>=3 && (std::string(argv[1])=="run" || std::string(argv[1])=="advance")) {
             const bool partial=std::string(argv[1])=="advance";
             xgpu::require(partial?argc==5:(argc==3 || argc==4),"argumentos de ejecucion invalidos");
@@ -100,6 +117,7 @@ int main(int argc,char** argv) {
                  <<"     gpu_c11 advance programa.xgpu pasos checkpoint.xgs\n"
                  <<"     gpu_c11 resume checkpoint.xgs [resultado.xgs]\n"
                  <<"     gpu_c11 inspect checkpoint.xgs\n";
+        std::cerr<<"     gpu_c11 export checkpoint.xgs despacho salida.bin\n";
         return 2;
     } catch(const std::exception& error) { std::cerr<<"XGPU-C11: "<<error.what()<<'\n'; return 1; }
 }
