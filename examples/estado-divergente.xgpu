@@ -1,0 +1,27 @@
+# Algunas ejecuciones dan tres vueltas mientras sus companeras esperan.
+xgpu 2
+dominio 11
+grupo 4
+compartida 4
+global 11
+indice r0
+local r1
+constante r2 1
+guarda_compartida r1 r0
+constante r3 0
+constante r4 3
+constante r5 2
+menor r6 r1 r5
+si r6 bucle
+salta reunion
+marca bucle
+suma r3 r3 r2
+menor r6 r3 r4
+si r6 bucle
+marca reunion
+barrera
+carga_compartida r7 r1
+barrera
+guarda_global r0 r7
+salida r7
+fin

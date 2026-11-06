@@ -1,0 +1,10 @@
+xgpu 2
+dominio 32
+grupo 8
+compartida 0
+global 1
+constante r0 0
+constante r1 1
+atomica_global r2 r0 r1
+salida r2
+fin
