@@ -17,13 +17,13 @@ public final class CompactTriangleStream {
     private int[] order=new int[0], offsets=new int[0], lengths=new int[0];
     private boolean[] dirty=new boolean[0];
     private boolean invalid=true;
-    private byte[] packet;
+    private ByteBuffer packet;
     private int ranges, usedBytes;
     public final int[] starts=new int[4], counts=new int[4];
     public long uploadedBytes;
 
-    private static int i32(byte[] b,int at){return (b[at]&255)|((b[at+1]&255)<<8)|((b[at+2]&255)<<16)|(b[at+3]<<24);}
-    private static int u16(byte[] b,int at){return (b[at]&255)|((b[at+1]&255)<<8);}
+    private static int i32(ByteBuffer b,int at){return b.getInt(at);}
+    private static int u16(ByteBuffer b,int at){return b.getShort(at)&65535;}
     private static void need(boolean ok,String why){if(!ok)throw new IllegalArgumentException("GPU-VIRTUAL XFG4: "+why);}
     private void reserve(int faces){
         if(faces<=order.length)return;
@@ -48,11 +48,17 @@ public final class CompactTriangleStream {
 
     /** Pass -1 omits a metadata face. Pass 2 keeps the exact back-to-front sort. */
     public void update(byte[] source,byte[] categories,byte[] passes){
-        need(source!=null&&source.length>=HEADER,"truncated source");
+        need(source!=null,"truncated source");
+        update(ByteBuffer.wrap(source),categories,passes);
+    }
+    /** Borrow an immutable qSSD projection; never copy it into a heap array. */
+    public void update(ByteBuffer source,byte[] categories,byte[] passes){
+        need(source!=null&&source.position()==0&&source.limit()>=HEADER,"truncated source");
+        source=source.asReadOnlyBuffer().order(ByteOrder.LITTLE_ENDIAN);
         int faces=i32(source,12);
-        need(source[0]=='X'&&source[1]=='F'&&source[2]=='G'&&source[3]=='4'&&
+        need(source.get(0)=='X'&&source.get(1)=='F'&&source.get(2)=='G'&&source.get(3)=='4'&&
              u16(source,4)==3840&&u16(source,6)==2160&&i32(source,8)==4,"source revision");
-        need(faces>=0&&faces<=MAX_FACES&&source.length==HEADER+faces*FACE,"face budget or length");
+        need(faces>=0&&faces<=MAX_FACES&&source.limit()==HEADER+faces*FACE,"face budget or length");
         need(categories!=null&&passes!=null&&categories.length>=faces&&passes.length>=faces,"classification length");
         reserve(faces);packet=source;Arrays.fill(counts,0);Arrays.fill(dirty,false);
         for(int i=0;i<faces;i++){
