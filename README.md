@@ -3,7 +3,9 @@
 Proyecto propio de representacion compacta del **estado de ejecucion** de una
 GPU virtual. C01 conserva el nucleo original; [C11](docs/C11-ejecucion-estados.md)
 lo reutiliza para evolucionar juntos registros, control por invocacion, memoria,
-barreras y una cola de despachos dependientes. El codigo del nucleo se escribio
+barreras y una cola de despachos dependientes. [C12](docs/C12-relaciones-ejecutables.md)
+amplia esa autoridad con relaciones ejecutables compartidas, periodos demostrados,
+memoria versionada y operaciones binary32 propias. El codigo del nucleo se escribio
 desde cero con C++17 y su biblioteca estandar. El ejecutor corre sobre la CPU
 anfitriona.
 
@@ -353,4 +355,30 @@ La referencia escalar mantiene PCs y arreglos por invocacion, sin usar los campo
 compactos para evolucionar. Contrasta todos los registros, memorias, salidas,
 esperas, epocas y cursores en cada paso de las cargas pequenas. C01 conserva sus
 pruebas originales. Ver comandos, presupuestos y limites en la documentacion C11.
+
+## C12: aprovechar relaciones sin desplegar todas las ejecuciones
+
+[Relaciones ejecutables C12](docs/C12-relaciones-ejecutables.md) mantiene
+expresiones compartidas junto al programa, el control, la memoria y las esperas.
+Reutiliza valores identicos por comparacion exacta, conserva lecturas contra la
+version de memoria que las produjo y comprueba los accesos antes de publicar.
+Los indices periodicos, operaciones de bits, prefijos atomicos uniformes y
+algunas lecturas/escrituras demostrables operan sobre descripciones.
+
+El formato `.xgpu 3` activa este perfil y agrega conversion uint32 a binary32,
+suma, producto y comparacion flotante con orden y redondeo definidos. `.xgpu 1/2`
+conserva el perfil C11 y sus checkpoints. El exportador materializa la salida
+completa explicitamente cuando se solicita.
+
+```sh
+bash build-c12.sh
+./build/gpu_c12 run examples/relaciones-compartidas.xgpu evidence/current/c12/estado.xgs
+./build/gpu_c12 export evidence/current/c12/estado.xgs 0 evidence/current/c12/salida.bin
+```
+
+La campana compara salidas completas con C11 fijado al commit publicado, mide
+ejecucion y materializacion, y conserva resultados separados de serializacion y
+RSS. Tambien incluye una carga ya compacta para hacer visible el coste adicional
+del nuevo perfil. Los resultados son del ejecutor CPU; la integracion con el
+bus qSSD/XI, las trazas RFS1 y el render del juego continúan en el siguiente ciclo.
 

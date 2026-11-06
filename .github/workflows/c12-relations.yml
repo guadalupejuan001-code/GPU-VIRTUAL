@@ -1,0 +1,48 @@
+name: C12 - relaciones ejecutables y float32
+
+'on':
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  relations:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Obtener la revision exacta
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Obtener C11 inmutable para comparar
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 567b97a5ccd59f4a25a4df351bd6e48d0e0f8665
+          path: build/c11-baseline
+          persist-credentials: false
+      - name: Conservar nucleo C01 y ejecucion C11
+        run: |
+          bash build.sh
+          bash build-c11.sh > evidence/current/c11-console.jsonl
+      - name: Comprobar relaciones, memoria y bits float32
+        run: bash build-c12.sh
+      - name: Continuacion entre procesos y formato C11 original
+        run: python3 scripts/verify-c12-process.py --baseline-root build/c11-baseline
+      - name: Sanitizadores y fugas
+        run: bash sanitizers-c12.sh
+      - name: Comparar costes hasta la salida completa
+        run: python3 scripts/measure-c12.py --baseline-root build/c11-baseline --rounds 5
+      - name: Conservar resultados y checkpoints
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: GPU-VIRTUAL-C12-${{ github.sha }}
+          path: |
+            evidence/current/c12/
+            build/gpu_c12
+            build/relaciones_pruebas
+          if-no-files-found: error
+          retention-days: 30

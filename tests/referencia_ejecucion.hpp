@@ -1,9 +1,21 @@
 #pragma once
 #include "control_gpu.hpp"
+#include <cstring>
 
 // Oraculo escalar: arreglos por invocacion, PCs individuales y memoria explicita.
 // No usa Field, Mode, LaneMask, Execution ni su serializador para evolucionar.
 namespace execution_reference {
+inline std::uint32_t host_float(xgpu::StateOp op,std::uint32_t a,std::uint32_t b) {
+    static_assert(sizeof(float)==4 && std::numeric_limits<float>::is_iec559,"referencia requiere binary32");
+    float aa=0,bb=0;std::memcpy(&aa,&a,4);std::memcpy(&bb,&b,4);
+    volatile float av=aa,bv=bb,result=0;
+    if(op==xgpu::StateOp::FloatLess) return av<bv;
+    if(op==xgpu::StateOp::FloatAdd) result=av+bv;
+    else if(op==xgpu::StateOp::FloatMultiply) result=av*bv;
+    else result=static_cast<float>(a);
+    float value=result;std::uint32_t bits=0;std::memcpy(&bits,&value,4);
+    return (bits&0x7fffffffu)>0x7f800000u?0x7fc00000u:bits;
+}
 struct Dispatch {
     xgpu::Kernel kernel;
     std::size_t n,local,words,cursor=0;
@@ -77,6 +89,8 @@ public:
                 case O::ShiftRight:if(b>=32) throw std::runtime_error("shift escalar invalido"); dst=a>>b; break;
                 case O::Less:dst=a<b; break;
                 case O::Equal:dst=a==b; break;
+                case O::FloatFromUnsigned:case O::FloatAdd:case O::FloatMultiply:case O::FloatLess:
+                    dst=host_float(ins.op,a,b);break;
                 case O::Branch:if(a) next=static_cast<std::size_t>(ins.k); break;
                 case O::BranchIndexLess:if(lane<ins.k) next=ins.value; break;
                 case O::Jump:next=static_cast<std::size_t>(ins.k); break;
