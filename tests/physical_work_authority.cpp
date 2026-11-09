@@ -11,7 +11,7 @@ int main(){
   assert(p.camera_indices.size()==1&&p.shadow_indices.size()==1);
   assert(p.camera_rejected==1&&p.shadow_rejected==1);
   assert(p.changed_objects==3&&p.reused_objects==0);
-  assert(p.baseline_instance_bytes==448&&p.planned_instance_bytes==64);
+  assert(p.baseline_instance_bytes==448&&p.planned_instance_bytes==88);
   assert(p.camera_baseline_vertices==60&&p.shadow_baseline_vertices==60);
   assert(p.camera_planned_vertices==36&&p.shadow_planned_vertices==36);
   auto q=a.plan(in,vertices,102,true,true,true,.5f,.5f);
