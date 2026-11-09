@@ -38,6 +38,8 @@ struct PhysicalWorkPlan {
   std::uint64_t shadow_baseline_vertices=0,shadow_planned_vertices=0;
   std::uint64_t camera_baseline_fragments=0,camera_planned_fragments=0;
   std::uint64_t shadow_baseline_fragments=0,shadow_planned_fragments=0;
+  std::uint64_t camera_baseline_bytes=0,camera_planned_bytes=0;
+  std::uint64_t shadow_baseline_bytes=0,shadow_planned_bytes=0;
   std::uint64_t baseline_draw_work=0,planned_draw_work=0;
   bool compact_enabled=true,reuse_enabled=true,visibility_enabled=true;
 };
@@ -62,20 +64,21 @@ class PhysicalWorkAuthority {
       if(reuse_enabled&&same)++out.reused_objects;else ++out.changed_objects;
       const std::uint64_t vertices=mesh_vertices[c.mesh];
       if(c.camera_visible){
-        ++out.camera_candidates;out.baseline_vertex_invocations+=vertices;out.camera_baseline_vertices+=vertices;out.baseline_draw_work+=vertices;
+        ++out.camera_candidates;out.baseline_vertex_invocations+=vertices;out.camera_baseline_vertices+=vertices;out.baseline_draw_work+=vertices;out.camera_baseline_bytes+=112ULL;
         const auto area=estimate_area(c.camera_diameter_px);out.baseline_fragment_estimate+=area;out.camera_baseline_fragments+=area;
-        if(!visibility_enabled||c.camera_diameter_px>=camera_pixel_threshold){out.camera_indices.push_back(i);out.planned_vertex_invocations+=vertices;out.camera_planned_vertices+=vertices;out.planned_draw_work+=vertices;out.planned_fragment_estimate+=area;out.camera_planned_fragments+=area;}else ++out.camera_rejected;
+        if(!visibility_enabled||c.camera_diameter_px>=camera_pixel_threshold){out.camera_indices.push_back(i);out.planned_vertex_invocations+=vertices;out.camera_planned_vertices+=vertices;out.planned_draw_work+=vertices;out.planned_fragment_estimate+=area;out.camera_planned_fragments+=area;out.camera_planned_bytes+=(compact_enabled&&c.mesh!=3?32ULL:112ULL);}else ++out.camera_rejected;
       }
       if(c.shadow_visible){
-        ++out.shadow_candidates;out.baseline_vertex_invocations+=vertices;out.shadow_baseline_vertices+=vertices;out.baseline_draw_work+=vertices;
+        ++out.shadow_candidates;out.baseline_vertex_invocations+=vertices;out.shadow_baseline_vertices+=vertices;out.baseline_draw_work+=vertices;out.shadow_baseline_bytes+=112ULL;
         const auto area=estimate_area(c.shadow_diameter_texels);out.baseline_fragment_estimate+=area;out.shadow_baseline_fragments+=area;
-        if(!visibility_enabled||c.shadow_diameter_texels>=shadow_texel_threshold){out.shadow_indices.push_back(i);out.planned_vertex_invocations+=vertices;out.shadow_planned_vertices+=vertices;out.planned_draw_work+=vertices;out.planned_fragment_estimate+=area;out.shadow_planned_fragments+=area;}else ++out.shadow_rejected;
+        if(!visibility_enabled||c.shadow_diameter_texels>=shadow_texel_threshold){out.shadow_indices.push_back(i);out.planned_vertex_invocations+=vertices;out.shadow_planned_vertices+=vertices;out.planned_draw_work+=vertices;out.planned_fragment_estimate+=area;out.shadow_planned_fragments+=area;out.shadow_planned_bytes+=(compact_enabled&&c.mesh!=3?32ULL:112ULL);}else ++out.shadow_rejected;
       }
     }
-    const std::uint64_t baseline_instances=out.camera_candidates+out.shadow_candidates;
-    const std::uint64_t planned_instances=out.camera_indices.size()+out.shadow_indices.size();
-    out.baseline_instance_bytes=baseline_instances*112ULL;
-    out.planned_instance_bytes=planned_instances*(compact_enabled?32ULL:112ULL);
+    // Previous instancing transported 28 floats/object. Compact transport uses
+    // 7 floats plus normalized RGBA8. Billboard mesh 3 retains its exact
+    // camera-facing matrix because a yaw-only payload would not be equivalent.
+    out.baseline_instance_bytes=out.camera_baseline_bytes+out.shadow_baseline_bytes;
+    out.planned_instance_bytes=out.camera_planned_bytes+out.shadow_planned_bytes;
     previous_.swap(next);
     return out;
   }
