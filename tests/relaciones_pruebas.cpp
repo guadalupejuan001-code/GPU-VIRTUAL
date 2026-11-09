@@ -1,4 +1,5 @@
 #include "programa_ejecucion.hpp"
+#include "compact_relation.hpp"
 #include "snapshot_gpu.hpp"
 #include "referencia_ejecucion.hpp"
 #include <cfenv>
@@ -172,6 +173,24 @@ void large_relations_and_float() {
     xgpu::ValueReader stream(repeated.dispatch(0).output);
     check(stream.at(3)==expected,"plan profundo cambia bits");
 }
+void compact_affine_descriptor() {
+    constexpr xgpu::Index n=4096;
+    xgpu::Field affine(n,xgpu::Mode({17,13}));
+    auto relation=xgpu::field_root(affine);
+    auto mask=xgpu::field_root(xgpu::Field(n,xgpu::Mode({4095})));
+    relation=xgpu::Value::node(xgpu::ValueKind::And,n,relation,mask,0,xgpu::LaneMask(n,true));
+    xgpu::CompactAffineMask compact{};
+    check(xgpu::describe_compact_affine_mask(relation,compact),"relacion afin compacta no reconocida");
+    check(compact.count==n && compact.base==17 && compact.stride==13 && compact.mask==4095 && compact.masked,
+          "descriptor afin compacto incorrecto");
+    for(const auto lane:std::vector<xgpu::Index>{0,1,7,63,1024,n-1})
+        check(relation->at(lane)==((17u+static_cast<xgpu::Word>(lane)*13u)&4095u),
+              "descriptor afin no conserva la relacion");
+    auto detailed=affine.patched(3,99);
+    xgpu::CompactAffineMask rejected_descriptor{};
+    check(!xgpu::describe_compact_affine_mask(xgpu::field_root(std::move(detailed)),rejected_descriptor),
+          "campo con excepciones se describio como afin puro");
+}
 void failures_and_archives() {
     auto a=make(4);a.enqueue({{{O::Index,0},{O::Constant,1,0,0,0,31},{O::Add,1,0,1},{O::ShiftLeft,2,0,1},{O::Halt}}},4);
     a.step();a.step();a.step();auto before=a.snapshot();rejected([&]{a.step();});check(a.snapshot()==before,"fallo de shift publica estado");
@@ -200,7 +219,7 @@ void failures_and_archives() {
 }
 int main() {
     try {
-        floating_bits();random_programs();memory_versions();control_and_atomics();large_relations_and_float();failures_and_archives();
+        floating_bits();random_programs();memory_versions();control_and_atomics();large_relations_and_float();compact_affine_descriptor();failures_and_archives();
         std::cout<<"{\"profile\":\"XGPU-C12\",\"checks\":"<<checks<<",\"random_kernels\":120,\"float_random_pairs\":1000000,\"differential_steps\":"<<steps
                  <<",\"snapshots\":"<<snapshots<<",\"hardware_gpu_executed\":false,\"failures\":0}\n";
         return 0;
