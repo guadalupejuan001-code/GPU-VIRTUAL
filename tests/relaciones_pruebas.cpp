@@ -1,4 +1,5 @@
-#include "programa_ejecucion.hpp"\n#include "compact_relation.hpp"
+#include "programa_ejecucion.hpp"
+#include "compact_relation.hpp"
 #include "snapshot_gpu.hpp"
 #include "referencia_ejecucion.hpp"
 #include <cfenv>
