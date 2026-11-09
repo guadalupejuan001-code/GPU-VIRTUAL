@@ -1,0 +1,14 @@
+name: GPU Virtual physical work authority
+on:
+  pull_request:
+    paths: ['include/trabajo_fisico.hpp','tests/physical_work_authority.cpp','.github/workflows/physical-work.yml']
+  push:
+    branches: [feature/physical-work-authority-20261109]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: g++ -std=c++17 -O2 -Wall -Wextra -Werror -Iinclude tests/physical_work_authority.cpp -o /tmp/physical-work && /tmp/physical-work
