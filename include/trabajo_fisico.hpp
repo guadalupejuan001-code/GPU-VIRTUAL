@@ -66,16 +66,16 @@ class PhysicalWorkAuthority {
       if(c.camera_visible){
         ++out.camera_candidates;out.baseline_vertex_invocations+=vertices;out.camera_baseline_vertices+=vertices;out.baseline_draw_work+=vertices;out.camera_baseline_bytes+=112ULL;
         const auto area=estimate_area(c.camera_diameter_px);out.baseline_fragment_estimate+=area;out.camera_baseline_fragments+=area;
-        if(!visibility_enabled||c.camera_diameter_px>=camera_pixel_threshold){out.camera_indices.push_back(i);out.planned_vertex_invocations+=vertices;out.camera_planned_vertices+=vertices;out.planned_draw_work+=vertices;out.planned_fragment_estimate+=area;out.camera_planned_fragments+=area;out.camera_planned_bytes+=(compact_enabled&&c.mesh!=3?32ULL:112ULL);}else ++out.camera_rejected;
+        if(!visibility_enabled||c.camera_diameter_px>=camera_pixel_threshold){out.camera_indices.push_back(i);out.planned_vertex_invocations+=vertices;out.camera_planned_vertices+=vertices;out.planned_draw_work+=vertices;out.planned_fragment_estimate+=area;out.camera_planned_fragments+=area;out.camera_planned_bytes+=(compact_enabled&&c.mesh!=3?44ULL:112ULL);}else ++out.camera_rejected;
       }
       if(c.shadow_visible){
         ++out.shadow_candidates;out.baseline_vertex_invocations+=vertices;out.shadow_baseline_vertices+=vertices;out.baseline_draw_work+=vertices;out.shadow_baseline_bytes+=112ULL;
         const auto area=estimate_area(c.shadow_diameter_texels);out.baseline_fragment_estimate+=area;out.shadow_baseline_fragments+=area;
-        if(!visibility_enabled||c.shadow_diameter_texels>=shadow_texel_threshold){out.shadow_indices.push_back(i);out.planned_vertex_invocations+=vertices;out.shadow_planned_vertices+=vertices;out.planned_draw_work+=vertices;out.planned_fragment_estimate+=area;out.shadow_planned_fragments+=area;out.shadow_planned_bytes+=(compact_enabled&&c.mesh!=3?32ULL:112ULL);}else ++out.shadow_rejected;
+        if(!visibility_enabled||c.shadow_diameter_texels>=shadow_texel_threshold){out.shadow_indices.push_back(i);out.planned_vertex_invocations+=vertices;out.shadow_planned_vertices+=vertices;out.planned_draw_work+=vertices;out.planned_fragment_estimate+=area;out.shadow_planned_fragments+=area;out.shadow_planned_bytes+=(compact_enabled&&c.mesh!=3?44ULL:112ULL);}else ++out.shadow_rejected;
       }
     }
     // Previous instancing transported 28 floats/object. Compact transport uses
-    // 7 floats plus normalized RGBA8. Billboard mesh 3 retains its exact
+    // 11 exact floats (transform/scale/color). Billboard mesh 3 retains its exact
     // camera-facing matrix because a yaw-only payload would not be equivalent.
     out.baseline_instance_bytes=out.camera_baseline_bytes+out.shadow_baseline_bytes;
     out.planned_instance_bytes=out.camera_planned_bytes+out.shadow_planned_bytes;
