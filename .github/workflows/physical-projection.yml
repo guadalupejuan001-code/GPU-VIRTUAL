@@ -1,0 +1,20 @@
+name: GPU Virtual physical projection
+on:
+  push:
+    branches: [feature/physical-work-projection-20261109]
+  pull_request:
+    branches: [main]
+    paths:
+      - 'include/physical_projection.hpp'
+      - 'tests/physical_projection.cpp'
+      - '.github/workflows/physical-projection.yml'
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build exact compact relation projection test
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -Iinclude tests/physical_projection.cpp -o physical_projection_test
+          ./physical_projection_test
