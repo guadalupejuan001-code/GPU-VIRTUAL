@@ -1,6 +1,8 @@
 #include "trabajo_fisico.hpp"
+#include "guest_triangle_work.hpp"
 #include <cassert>
 #include <iostream>
+#include <limits>
 #include <vector>
 int main(){
   xgpu::PhysicalWorkAuthority a;
@@ -35,5 +37,19 @@ int main(){
   bool rejected = false;
   try { display.plan(64, rows); } catch (const std::out_of_range&) { rejected = true; }
   assert(rejected);
+  xgpu::GuestTriangleWork triangles;
+  const xgpu::GuestVertex a0{-1, 0, .25f, 1, 0xff0000ffU};
+  const xgpu::GuestVertex a1{-.5f, 1, .25f, 1, 0xff00ff00U};
+  const xgpu::GuestVertex a2{-.5f, -1, .25f, 1, 0xffff0000U};
+  const xgpu::GuestVertex outside{2, 1, .25f, 1, 0xff0000ffU};
+  auto visible = triangles.plan({outside, outside, outside, a0, a1, a2, outside, a1, a0});
+  assert(visible.revision == 1 && visible.source_triangles == 3 &&
+         visible.vertices.size() == 6 && visible.vertices[0].x == a0.x &&
+         visible.vertices[4].rgba == a1.rgba && visible.vertices.back().x == a0.x);
+  auto invalid = a0;
+  invalid.z = std::numeric_limits<float>::quiet_NaN();
+  rejected = false;
+  try { triangles.plan({a0, invalid, a2}); } catch (const std::invalid_argument&) { rejected = true; }
+  assert(rejected && triangles.plan({}).revision == 2);
   std::cout<<"physical work authority passed\n";
 }
