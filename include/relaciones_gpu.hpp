@@ -1,7 +1,9 @@
 #pragma once
 #include "control_gpu.hpp"
 #include "float32_gpu.hpp"
+#include <cstring>
 #include <functional>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -418,7 +420,56 @@ class ValueReader {
         }
         memo_.reserve(64);
     }
+    Index pattern_words(Index begin, Index count) const {
+        require(begin <= root_->count && count <= root_->count - begin,
+                "salida fuera del dominio de la relacion");
+        return root_->period() ? std::min(root_->period(), count) : count;
+    }
+    static std::uint64_t triangular(Index n) {
+        return n < 2 ? 0 : (n % 2 ? n * ((n - 1) / 2) : (n / 2) * (n - 1));
+    }
+    // Sum floor((slope * i + start) / modulus) using the Euclidean recursion.
+    // In the uint32 domain n, slope, start and modulus keep slope * n + start
+    // below 2^64 after the remainders. Every accumulated term is nonnegative.
+    static std::uint64_t floor_sum(Index n, Index modulus, Index slope, Index start) {
+        std::uint64_t total = 0;
+        for (;;) {
+            total += triangular(n) * (slope / modulus) + n * (start / modulus);
+            slope %= modulus;
+            start %= modulus;
+            const auto next = slope * n + start;
+            if (next < modulus) return total;
+            n = next / modulus;
+            start = next % modulus;
+            std::swap(modulus, slope);
+        }
+    }
+    static std::optional<std::uint64_t> affine_sum(const Field& field, Index begin, Index count) {
+        constexpr Index modulus = Index{1} << 32;
+        const auto end = begin + count;
+        std::uint64_t total = 0;
+        for (const auto& band : field.bands) {
+            const auto first = std::max(begin, band.begin);
+            const auto last = std::min(end, band.end);
+            if (first >= last) continue;
+            const auto& coefficients = band.mode.coefficients;
+            if (coefficients.size() > 2) return std::nullopt;
+            const auto slope = coefficients.size() == 2 ? coefficients[1] : 0;
+            const auto n = last - first;
+            const auto start = band.mode.at(first);
+            // Unsigned operations are modulo 2^64. Their combined residue is
+            // the exact sum, whose bound is 2^32 * (2^32 - 1) < 2^64.
+            total += n * start + triangular(n) * slope - modulus * floor_sum(n, modulus, slope, start);
+        }
+        for (auto it = field.details.lower_bound(begin); it != field.details.end() && it->first < end; ++it) {
+            total -= field.base_at(it->first);
+            total += it->second;
+        }
+        return total;
+    }
 public:
+    struct UnsignedSum { std::uint64_t value; Index evaluated_words; };
+
     explicit ValueReader(FieldRoot root):owner_(std::move(root)),root_(owner_.get()) {prepare(true);}
     explicit ValueReader(const Value& root):root_(&root) {prepare(false);}
     Word at(Index index) {
@@ -434,6 +485,48 @@ public:
             return values_.back();
         }
         memo_.clear();return read(root_,index);
+    }
+
+    // Serialize a contiguous range. The returned count is the number of
+    // words evaluated before copying the remainder of a proven period.
+    std::size_t copy_little_endian(Index begin, std::size_t count, char* destination) {
+        constexpr std::size_t word_bytes = 4;
+        require(count <= std::numeric_limits<std::size_t>::max() / word_bytes &&
+                    (count == 0 || destination),
+                "buffer de salida relacional invalido");
+
+        const auto evaluated = static_cast<std::size_t>(pattern_words(begin, count));
+        for (std::size_t i = 0; i < evaluated; ++i) {
+            const auto value = at(begin + i);
+            for (unsigned byte = 0; byte < word_bytes; ++byte)
+                destination[i * word_bytes + byte] = static_cast<char>((value >> (8U * byte)) & 0xffU);
+        }
+
+        const auto bytes = count * word_bytes;
+        for (std::size_t written = evaluated * word_bytes; written < bytes;) {
+            const auto copy = std::min(written, bytes - written);
+            std::memcpy(destination + written, destination, copy);
+            written += copy;
+        }
+        return evaluated;
+    }
+
+    UnsignedSum sum_unsigned(Index begin, Index count) {
+        const auto evaluated = pattern_words(begin, count);
+        if (!evaluated) return {0, 0};
+        if (direct_ && !root_->period()) {
+            if (const auto sum = affine_sum(*direct_, begin, count)) return {*sum, 0};
+        }
+        const auto tail = count % evaluated;
+        std::uint64_t cycle_sum = 0;
+        std::uint64_t tail_sum = 0;
+        for (Index i = 0; i < evaluated; ++i) {
+            const auto value = at(begin + i);
+            cycle_sum += value;
+            if (i < tail) tail_sum += value;
+        }
+        // At most 2^32 unsigned 32-bit words fit their exact sum in 64 bits.
+        return {cycle_sum * (count / evaluated) + tail_sum, evaluated};
     }
 };
 inline Word Value::at(Index index) const {

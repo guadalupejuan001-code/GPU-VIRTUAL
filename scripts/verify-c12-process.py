@@ -42,6 +42,9 @@ for name in ("relaciones-compartidas", "flotantes-ordenados"):
     else:
         expected = [struct.unpack("<I", struct.pack("<f", float((i + 1) * 2)))[0] for i in range(65536)]
     assert values == expected, "full exported output differs from closed-form reference"
+    assert int(invoke(binary, "sum-u32", complete, 0)["sum_u64"]) == sum(expected)
+    query = invoke(binary, "sum-u32", complete, 0, 61, 997)
+    assert int(query["sum_u64"]) == sum(expected[61:1058])
     hashes = []
     for stop in (0, 1, 3, 5, 8, 10, final["steps"]):
         partial = OUT / f"{name}-step-{stop:03d}.xgs"
@@ -55,6 +58,18 @@ for name in ("relaciones-compartidas", "flotantes-ordenados"):
         hashes.append({"step": stop, "sha256": hashlib.sha256(before).hexdigest()})
     records.append({"program": name, "checkpoints": hashes, "output_words_verified": 65536,
                     "output_sha256": hashlib.sha256(output.read_bytes()).hexdigest()})
+
+reversible = OUT / "reversible.xi"
+reversible.write_text("begin\nx 128\ncx 0 64\ncx 64 128\nend\n")
+inputs = [0, 1, 1 << 64, (1 << 128) | 3]
+observed = invoke(binary, "reversible-xi", 129, reversible, *(f"{value:x}" for value in inputs))
+expected = []
+for value in inputs:
+    value ^= 1 << 128
+    value ^= (value & 1) << 64
+    value ^= ((value >> 64) & 1) << 128
+    expected.append(f"{value:033x}")
+assert observed["outputs_hex"] == expected
 
 # Old snapshots must continue with identical old counters, aliases and wire bytes.
 legacy_checks = 0
