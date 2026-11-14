@@ -19,5 +19,21 @@ int main(){
   in[0].transform_revision++;
   auto r=a.plan(in,vertices,103,false,true,false,.5f,.5f);
   assert(r.changed_objects==1&&r.reused_objects==2&&r.planned_instance_bytes==448);
+  xgpu::FramebufferWorkAuthority display;
+  std::vector<xgpu::FramebufferSpan> rows(129, {64, 0});
+  assert(display.plan(64, rows).rectangles.empty());
+  rows[31] = rows[32] = {63, 64};
+  const auto patch = display.plan(64, rows);
+  assert(patch.revision == 1 && patch.pixels == 2 && patch.packet_words == 7 &&
+         !patch.full_frame && patch.rectangles.size() == 1 && patch.rectangles[0].x == 63 &&
+         patch.rectangles[0].y == 31 && patch.rectangles[0].height == 2);
+  for (std::size_t y = 0; y < rows.size(); ++y) rows[y] = {unsigned(y % 2), unsigned(y % 2 + 1)};
+  const auto full = display.plan(64, rows);
+  assert(full.revision == 2 && full.full_frame && full.pixels == 64 * 129 &&
+         full.rectangles.size() == 5 && full.rectangles.back().height == 1);
+  rows.back() = {63, 65};
+  bool rejected = false;
+  try { display.plan(64, rows); } catch (const std::out_of_range&) { rejected = true; }
+  assert(rejected);
   std::cout<<"physical work authority passed\n";
 }
