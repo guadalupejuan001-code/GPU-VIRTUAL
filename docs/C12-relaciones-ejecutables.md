@@ -148,6 +148,36 @@ resulta mas lento. `measurements.json` conserva todas las rondas, medianas, byte
 de checkpoint y pico RSS nativo. Son mediciones CPU del interprete con salidas
 completas, no una comparacion con un rasterizador convencional optimizado.
 
+## C12.1 · Exportación periódica, sumas exactas y circuitos XI reversibles
+
+`export` conserva todos los bytes de salida y escribe el formato little-endian
+existente. Cuando el ejecutor conoce un período, evalúa una vez ese patrón y
+copia sus repeticiones. Las salidas irregulares se evalúan en el orden original.
+
+`sum-u32` suma un rango válido de un despacho con resultado exacto de 64 bits.
+Los campos periódicos necesitan a lo sumo un período de evaluaciones. Los
+campos afines módulo 2^32 suman cada intervalo mediante una recurrencia euclídea
+y después corrigen sus excepciones. Los otros campos siguen usando el lector
+exacto. `sum_u64` se devuelve como decimal en una cadena JSON para que lo puedan
+leer programas cuyo tipo numérico no representa todos los enteros de 64 bits.
+
+`reversible-xi` compone las puertas `x objetivo` y `cx control objetivo` de XI
+sobre entradas en la base computacional. Acepta lotes `begin` y `end` y reutiliza
+la transformación con todos los operandos hexadecimales del comando. Empaqueta
+en palabras de 64 bits las dependencias que conservan su posición relativa y
+evalúa las demás salidas por paridad. La ejecución usa enteros del procesador
+anfitrión. El subconjunto cubre transformaciones afines binarias. Las sumas
+con acarreo, la superposición y las otras puertas siguen fuera de esta ruta.
+
+```sh
+bash build-c12.sh
+./build/gpu_c12 run examples/relaciones-compartidas.xgpu estado.xgs
+./build/gpu_c12 sum-u32 estado.xgs 0
+./build/gpu_c12 sum-u32 estado.xgs 0 61 997
+printf 'begin\nx 128\ncx 0 64\ncx 64 128\nend\n' > mascara.xi
+./build/gpu_c12 reversible-xi 129 mascara.xi 0 1 10000000000000000
+```
+
 ## Continuidad del proyecto
 
 C12 amplia la GPU de software con mas estados y relaciones realmente ejecutables.

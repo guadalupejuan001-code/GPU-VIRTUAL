@@ -1,8 +1,12 @@
 #include "programa_ejecucion.hpp"
 #include "snapshot_gpu.hpp"
+#include "transformacion_reversible.hpp"
 #include <fstream>
 #include <iostream>
 #include <filesystem>
+#include <limits>
+#include <sstream>
+#include <string_view>
 #if defined(__unix__)
 #include <cerrno>
 #include <cstdio>
@@ -50,6 +54,62 @@ void save_bytes(const std::string& bytes,const std::string& path) {
 #endif
 }
 void save(const xgpu::Execution& state,const std::string& path) {save_bytes(state.snapshot(),path);}
+
+using Reversible = xgpu::ReversibleBitTransform;
+
+std::vector<Reversible::Gate> read_reversible_gates(std::string_view program, std::size_t bits) {
+    std::istringstream input{std::string(program)};
+    std::vector<Reversible::Gate> gates;
+    bool in_batch = false;
+    for (std::string line; std::getline(input, line);) {
+        if (const auto comment = line.find('#'); comment != std::string::npos) line.resize(comment);
+        std::istringstream words(line);
+        std::string op, first, second, extra;
+        if (!(words >> op)) continue;
+        if (op == "begin" || op == "end") {
+            xgpu::require(!(words >> extra) && in_batch == (op == "end"),
+                          "marcador de lote XI desparejado");
+            in_batch = !in_batch;
+            continue;
+        }
+        const bool binary = op == "cx";
+        xgpu::require(binary || op == "x", "el perfil reversible XI admite x y cx");
+        xgpu::require(static_cast<bool>(words >> first) &&
+                      (!binary || static_cast<bool>(words >> second)) && !(words >> extra),
+                      "operandos invalidos en el circuito XI");
+        const auto index = [&](const std::string& value) {
+            return static_cast<std::size_t>(xgpu::decimal(value, bits - 1));
+        };
+        if (binary) gates.push_back({Reversible::Operation::Cnot, index(second), index(first)});
+        else gates.push_back({Reversible::Operation::X, index(first)});
+    }
+    xgpu::require(!in_batch, "lote XI sin fin");
+    return gates;
+}
+
+Reversible::Bits bits_from_hex(std::string_view hex, std::size_t bits) {
+    if (hex.substr(0, 2) == "0x") hex.remove_prefix(2);
+    xgpu::require(!hex.empty() && hex.size() <= (bits + 3) / 4, "entrada hexadecimal fuera de ancho");
+    Reversible::Bits input((bits + 63) / 64);
+    const std::string_view digits = "0123456789abcdefABCDEF";
+    std::size_t nibble = 0;
+    for (auto current = hex.rbegin(); current != hex.rend(); ++current, ++nibble) {
+        auto value = digits.find(*current);
+        xgpu::require(value != std::string_view::npos, "entrada hexadecimal invalida");
+        if (value > 15) value -= 6;
+        input[nibble / 16] |= std::uint64_t(value) << ((nibble % 16) * 4);
+    }
+    return input;
+}
+
+std::string bits_to_hex(const Reversible::Bits& value, std::size_t bits) {
+    constexpr std::string_view digits = "0123456789abcdef";
+    std::string hex((bits + 3) / 4, '0');
+    for (std::size_t i = 0; i < hex.size(); ++i)
+        hex[hex.size() - 1 - i] = digits[(value[i / 16] >> ((i % 16) * 4)) & 15U];
+    return hex;
+}
+
 void report(const xgpu::Execution& state) {
     const auto& c=state.counters();
     std::cout<<"{\"profile\":\""<<(state.profile()==xgpu::ExecutionProfile::C12?"XGPU-C12":"XGPU-C11")
@@ -81,16 +141,46 @@ void report(const xgpu::Execution& state) {
 }
 int main(int argc,char** argv) {
     try {
+        if (argc >= 5 && std::string_view(argv[1]) == "reversible-xi") {
+            const auto width = static_cast<std::size_t>(xgpu::decimal(argv[2],
+                                                std::numeric_limits<std::size_t>::max() - 63));
+            xgpu::require(width > 0, "ancho reversible invalido");
+            const auto gates = read_reversible_gates(read_file(argv[3], 16 * 1024 * 1024), width);
+            const Reversible transform(width, gates);
+            std::vector<std::string> outputs;
+            outputs.reserve(static_cast<std::size_t>(argc - 4));
+            for (int i = 4; i < argc; ++i)
+                outputs.push_back(bits_to_hex(transform.apply(bits_from_hex(argv[i], width)), width));
+            const auto counts = transform.operation_counts();
+            std::cout << "{\"bits\":" << width << ",\"gates\":" << gates.size()
+                      << ",\"packed_terms\":" << counts.packed_terms
+                      << ",\"parity_rows\":" << counts.parity_rows << ",\"outputs_hex\":[";
+            for (std::size_t i = 0; i < outputs.size(); ++i)
+                std::cout << (i ? ",\"" : "\"") << outputs[i] << '"';
+            std::cout << "]}\n";
+            return 0;
+        }
+        if ((argc == 4 || argc == 6) && std::string(argv[1]) == "sum-u32") {
+            const auto state = xgpu::Execution::restore(read_file(argv[2], xgpu::ExecutionCodec::maximum_bytes));
+            const auto id = xgpu::decimal(argv[3], 255);
+            const auto& job = state.dispatch(static_cast<std::size_t>(id));
+            const auto begin = argc == 6 ? xgpu::decimal(argv[4], job.count) : 0;
+            const auto count = argc == 6 ? xgpu::decimal(argv[5], job.count - begin) : job.count;
+            const auto requested = xgpu::LaneMask::interval(job.count, begin, begin + count);
+            xgpu::require(requested.subtracted(job.output_valid).empty(), "la salida solicitada aun esta incompleta");
+            const auto result = xgpu::ValueReader(job.output).sum_unsigned(begin, count);
+            std::cout << "{\"job\":" << id << ",\"begin\":" << begin << ",\"words\":" << count
+                      << ",\"evaluated_words\":" << result.evaluated_words
+                      << ",\"sum_u64\":\"" << result.value << "\"}\n";
+            return 0;
+        }
         if(argc==5 && std::string(argv[1])=="export") {
             const auto state=xgpu::Execution::restore(read_file(argv[2],xgpu::ExecutionCodec::maximum_bytes));
             const auto id=xgpu::decimal(argv[3],255);const auto& job=state.dispatch(static_cast<std::size_t>(id));
             xgpu::require(job.output_valid.full(),"la salida del despacho aun esta incompleta");
             xgpu::require(job.count<=16777216,"exportacion supera 64 MiB");
             xgpu::ValueReader reader(job.output);std::string bytes(static_cast<std::size_t>(job.count)*4,'\0');
-            for(xgpu::Index i=0;i<job.count;++i) {
-                const auto value=reader.at(i);
-                for(unsigned b=0;b<4;++b) bytes[static_cast<std::size_t>(i)*4+b]=static_cast<char>((value>>(8*b))&255);
-            }
+            reader.copy_little_endian(0, static_cast<std::size_t>(job.count), bytes.data());
             save_bytes(bytes,argv[4]);
             std::cout<<"{\"job\":"<<id<<",\"words\":"<<job.count<<",\"output_bytes\":"<<bytes.size()<<"}\n";
             return 0;
@@ -118,6 +208,8 @@ int main(int argc,char** argv) {
                  <<"     gpu_c11 resume checkpoint.xgs [resultado.xgs]\n"
                  <<"     gpu_c11 inspect checkpoint.xgs\n";
         std::cerr<<"     gpu_c11 export checkpoint.xgs despacho salida.bin\n";
+        std::cerr<<"     gpu_c12 sum-u32 checkpoint.xgs despacho [inicio cantidad]\n";
+        std::cerr<<"     gpu_c12 reversible-xi bits circuito.xi hex [hex ...]\n";
         return 2;
     } catch(const std::exception& error) { std::cerr<<"XGPU-C11: "<<error.what()<<'\n'; return 1; }
 }
