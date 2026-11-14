@@ -137,6 +137,80 @@ void control_and_atomics() {
     a=xgpu::make_execution(loop);b=execution_reference::Dense(loop.global_words);
     b.enqueue(loop.kernel,loop.count,loop.local_size,loop.shared_words);differential(a,b,true);
 }
+void periodic_output() {
+    constexpr xgpu::Index count=100003;
+    auto local=xgpu::Value::node(xgpu::ValueKind::Local,count,{},{},64,xgpu::LaneMask(count,true));
+    const auto mask=xgpu::field_root(xgpu::Field(count,xgpu::Mode({63})));
+    const auto patterned=xgpu::Value::node(xgpu::ValueKind::Xor,count,local,mask,0,xgpu::LaneMask(count,true));
+    xgpu::ValueReader reader(patterned);
+    constexpr xgpu::Index begin=61;
+    constexpr std::size_t length=997;
+    std::vector<char> bytes(length*4);
+    check(reader.copy_little_endian(begin,length,bytes.data())==64,"periodo no reutilizado");
+    std::uint64_t total=0;
+    for(std::size_t i=0;i<length;++i) {
+        const auto word=((begin+i)%64)^63;
+        total+=word;
+        check(static_cast<unsigned char>(bytes[4*i])==word && bytes[4*i+1]==0 &&
+              bytes[4*i+2]==0 && bytes[4*i+3]==0,"bytes exportados cambian en un rango desalineado");
+    }
+    const auto reduced=reader.sum_unsigned(begin,length);
+    check(reduced.value==total && reduced.evaluated_words==64,"suma de rango periodico incorrecta");
+    const auto short_sum=reader.sum_unsigned(63,2);
+    check(short_sum.value==63 && short_sum.evaluated_words==2,"rango corto no respeta fase");
+    check(reader.copy_little_endian(count,0,nullptr)==0 && reader.sum_unsigned(count,0).value==0,
+          "rango vacio al final no aceptado");
+    rejected([&]{reader.copy_little_endian(count,1,bytes.data());});
+    rejected([&]{reader.copy_little_endian(0,1,nullptr);});
+    rejected([&]{reader.sum_unsigned(count+1,0);});
+
+    const auto patched=xgpu::Value::node(xgpu::ValueKind::Patch,count,patterned,{},0,
+                                        xgpu::LaneMask(count,true),{{100,0xf3a17b4e}});
+    xgpu::ValueReader irregular(patched);
+    check(irregular.copy_little_endian(begin,length,bytes.data())==length,
+          "una excepcion rompe el periodo");
+    check(static_cast<unsigned char>(bytes[4*(100-begin)+0])==0x4e &&
+          static_cast<unsigned char>(bytes[4*(100-begin)+1])==0x7b &&
+          static_cast<unsigned char>(bytes[4*(100-begin)+2])==0xa1 &&
+          static_cast<unsigned char>(bytes[4*(100-begin)+3])==0xf3,
+          "la exportacion debe preservar orden y bits altos");
+    const auto irregular_sum=irregular.sum_unsigned(begin,length);
+    check(irregular_sum.evaluated_words==length && irregular_sum.value==total-(36^63)+0xf3a17b4eULL,
+          "la suma debe incluir el valor excepcional");
+
+    constexpr auto huge=xgpu::domain_limit;
+    xgpu::ValueReader constant(xgpu::field_root(xgpu::Field(huge,xgpu::Mode({UINT32_MAX}))));
+    const auto maximum=constant.sum_unsigned(0,huge);
+    check(maximum.value==18446744069414584320ULL && maximum.evaluated_words==1,
+          "la suma maxima uint32 debe conservar sus 64 bits");
+
+    for (const xgpu::Word stride : {1u, 2u, 3u, 17u, 0x80000000u, 0xffffffffu}) {
+        constexpr xgpu::Word first=0x9fa05d42;
+        const auto step=std::uint64_t{stride} & (std::uint64_t{0} - stride);
+        const auto expected=(huge/2)*(huge-step)+huge*(first%step);
+        xgpu::ValueReader affine(xgpu::field_root(xgpu::Field(huge,xgpu::Mode({first,stride}))));
+        const auto whole=affine.sum_unsigned(0,huge);
+        check(whole.value==expected && whole.evaluated_words==0,"suma afin modular de dominio completo");
+    }
+    std::mt19937_64 rng(0x475055414646ULL);
+    for (unsigned trial=0;trial<400;++trial) {
+        constexpr xgpu::Index n=257;
+        const auto base=static_cast<xgpu::Word>(rng());
+        const auto slope=static_cast<xgpu::Word>(rng());
+        xgpu::Field field(n,xgpu::Mode({base,slope}));
+        field.bands.clear();
+        xgpu::Field::append(field.bands,0,93,xgpu::Mode({base,slope}));
+        xgpu::Field::append(field.bands,93,n,xgpu::Mode({slope,base}));
+        field=field.patched(10,0).patched(99,UINT32_MAX).patched(256,5);
+        xgpu::ValueReader affine(xgpu::field_root(field));
+        const auto start=rng()%n;
+        const auto end=start+rng()%(n-start+1);
+        std::uint64_t expected=0;
+        for(auto lane=start;lane<end;++lane) expected+=field.at(lane);
+        const auto actual=affine.sum_unsigned(start,end-start);
+        check(actual.value==expected && actual.evaluated_words==0,"suma afin entre bandas con excepciones");
+    }
+}
 void large_relations_and_float() {
     constexpr xgpu::Index n=65536;
     xgpu::Kernel k{{{O::Index,0},{O::FloatFromUnsigned,1,0},{O::Constant,2,0,0,0,0x3e000000},
@@ -200,7 +274,8 @@ void failures_and_archives() {
 }
 int main() {
     try {
-        floating_bits();random_programs();memory_versions();control_and_atomics();large_relations_and_float();failures_and_archives();
+        floating_bits();random_programs();memory_versions();control_and_atomics();periodic_output();
+        large_relations_and_float();failures_and_archives();
         std::cout<<"{\"profile\":\"XGPU-C12\",\"checks\":"<<checks<<",\"random_kernels\":120,\"float_random_pairs\":1000000,\"differential_steps\":"<<steps
                  <<",\"snapshots\":"<<snapshots<<",\"hardware_gpu_executed\":false,\"failures\":0}\n";
         return 0;
