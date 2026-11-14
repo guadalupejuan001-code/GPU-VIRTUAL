@@ -44,6 +44,74 @@ struct PhysicalWorkPlan {
   bool compact_enabled=true,reuse_enabled=true,visibility_enabled=true;
 };
 
+struct FramebufferSpan {
+  std::uint32_t left, right; // Exclusive end. An empty row has left >= right.
+};
+struct FramebufferRect {
+  std::uint32_t x, y, width, height;
+};
+struct FramebufferWorkPlan {
+  std::uint64_t revision = 0;
+  std::vector<FramebufferRect> rectangles;
+  std::size_t pixels = 0, packet_words = 0;
+  bool full_frame = false;
+};
+
+// Exact 2D transfer policy for a materialized guest display. The consumer
+// supplies spans of pixels which differ from the last published frame.
+// Preserve each changed pixel, merge identical adjacent spans, and cap
+// the work of rebuilding a fragmented update at one complete frame.
+class FramebufferWorkAuthority {
+ public:
+  static constexpr std::uint32_t kStripeHeight = 32;
+  static constexpr std::size_t kRectangleLimit = 128;
+  static constexpr std::size_t kRectangleHeaderWords = 4;
+
+  FramebufferWorkPlan plan(std::uint32_t width, const std::vector<FramebufferSpan>& rows) {
+    if (!width || rows.empty() || rows.size() > UINT32_MAX ||
+        std::uint64_t(width) * rows.size() > std::numeric_limits<std::size_t>::max() -
+            (1 + kRectangleHeaderWords * (kRectangleLimit + 1)) ||
+        rows.size() > kStripeHeight * kRectangleLimit)
+      throw std::invalid_argument("framebuffer work geometry");
+    FramebufferWorkPlan out;
+    bool fragmented = false;
+    for (std::uint32_t y = 0; y < rows.size(); ++y) {
+      const auto [left, right] = rows[y];
+      if (left >= right) continue;
+      if (right > width) throw std::out_of_range("framebuffer work span");
+      if (fragmented) continue;
+      out.pixels += right - left;
+      if (!out.rectangles.empty()) {
+        auto& last = out.rectangles.back();
+        if (last.x == left && last.width == right - left && last.y + last.height == y) {
+          ++last.height;
+          continue;
+        }
+      }
+      out.rectangles.push_back({left, y, right - left, 1});
+      fragmented = out.rectangles.size() > kRectangleLimit;
+    }
+    if (out.rectangles.empty()) return out;
+    const auto height = static_cast<std::uint32_t>(rows.size());
+    const auto full_pixels = std::size_t(width) * height;
+    const auto full_stripes = (height + kStripeHeight - 1) / kStripeHeight;
+    if (fragmented || out.pixels + kRectangleHeaderWords * out.rectangles.size() >=
+                          full_pixels + kRectangleHeaderWords * full_stripes ||
+        out.pixels == full_pixels) {
+      out.rectangles.clear();
+      for (std::uint32_t y = 0; y < height; y += kStripeHeight)
+        out.rectangles.push_back({0, y, width, std::min(kStripeHeight, height - y)});
+      out.pixels = full_pixels;
+      out.full_frame = true;
+    }
+    out.packet_words = 1 + kRectangleHeaderWords * out.rectangles.size() + out.pixels;
+    out.revision = ++revision_;
+    return out;
+  }
+ private:
+  std::uint64_t revision_ = 0;
+};
+
 class PhysicalWorkAuthority {
  public:
   struct Revision { std::uint64_t transform=0,material=0; };
