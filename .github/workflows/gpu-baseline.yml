@@ -22,3 +22,5 @@ jobs:
         env:
           GPU_CHECK_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: python3 scripts/check-gpu-baseline.py --head "$GPU_CHECK_HEAD"
+      - name: Verificar C13 y comparar cuadros completos
+        run: bash build-c13.sh
