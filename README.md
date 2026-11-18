@@ -7,6 +7,10 @@ conserva este punto de partida. [VERSION](VERSION) indica el ciclo actual y
 los formatos que deben conservarse. Esta base reune el ejecutor C12 y el modulo
 compacto de REgraphics que admite geometria compartida de solo lectura.
 
+[C13](docs/C13-residencia-grafica.md) añade residencia de páginas gráficas. Reutiliza
+las versiones vigentes en un atlas de capacidad fija y entrega solo las cargas y
+actualizaciones de tabla que el siguiente cuadro necesita.
+
 Proyecto propio de representacion compacta del **estado de ejecucion** de una
 GPU virtual. C01 conserva el nucleo original; [C11](docs/C11-ejecucion-estados.md)
 lo reutiliza para evolucionar juntos registros, control por invocacion, memoria,
